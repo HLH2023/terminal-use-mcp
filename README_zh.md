@@ -388,6 +388,7 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `TERMINAL_USE_LOG_LEVEL` | 日志详细度：`debug`、`info`、`warn`、`error` | `info` |
 | `TERMINAL_USE_HOSTS_CONFIG` | SSH 主机配置文件路径 | XDG 配置目录 / hosts.json（profiles/*.json 优先） |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | 设为 `1` 允许在工具调用中内联指定 SSH 主机 | _(未设置 — 禁止)_ |
+| `TERMINAL_USE_STORE_RAW_TRANSCRIPT` | 设为 `1` 同时保存原始（未脱敏）transcript 文件 | _(未设置 — 仅保存脱敏版)_ |
 
 #### 路径覆盖
 
@@ -468,7 +469,7 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 |------|------|
 | `terminal.targets` | 列出可用目标（本地 + SSH） |
 | `terminal.target_info` | 查询目标详情（脱敏） |
-| `terminal.verify_target` | 验证 SSH 目标连通性 |
+| `terminal.verify_target` | 验证 SSH 目标本地前置条件 |
 
 ### tmux 管理（2 个工具）
 

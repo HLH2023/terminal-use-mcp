@@ -6,6 +6,7 @@ import { mouseClickToTmuxSequence, mouseScrollToTmuxSequence, validateMouseCoord
 import { createSnapshot } from "../terminal/terminal-snapshot.js";
 import { detectRiskSignals } from "../terminal/confirm-detection.js";
 import { calculatePollDelay, checkScreenStable, checkTextMatch, hashScreen } from "../terminal/wait.js";
+import { validateRegexSafety } from "../terminal/command-safety.js";
 import { TranscriptRecorder } from "../terminal/transcript.js";
 import { generateSessionId } from "../terminal/ids.js";
 import { createRemoteCwdPolicy, assertRemoteCwdAllowed } from "../targets/remote-cwd-policy.js";
@@ -45,6 +46,7 @@ export async function execSshTmux(profile, args, options) {
         keyFile,
         connectTimeoutMs: profile.connectTimeoutMs,
         execTimeoutMs: options?.timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
+        knownHosts: profile.knownHosts !== undefined ? expandUserPath(profile.knownHosts) : undefined,
     });
 }
 /** 生成远程 tmux session 名；rtumcp_ 前缀用于和本地 tumcp_ 区分。 */
@@ -374,7 +376,13 @@ export class SshTmuxProvider {
         const snapshot = await this.snapshot(session.tmuxId);
         const lines = snapshot.screen.split("\n");
         const results = [];
-        const re = regex ? new RegExp(pattern, "gu") : undefined;
+        const re = regex ? (() => {
+            const validation = validateRegexSafety(pattern);
+            if (!validation.ok) {
+                throw new TerminalUseError({ code: "UNSAFE_REGEX", message: validation.reason, retryable: false });
+            }
+            return new RegExp(pattern, "gu");
+        })() : undefined;
         for (let row = 0; row < lines.length; row += 1) {
             const line = lines[row];
             if (regex === true && re !== undefined) {
@@ -740,6 +748,7 @@ function createCapabilityTransport(target) {
                 keyFile,
                 connectTimeoutMs: target.connectTimeoutMs,
                 execTimeoutMs: timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
+                knownHosts: target.knownHosts !== undefined ? expandUserPath(target.knownHosts) : undefined,
             });
             return { stdout: result.stdout, stderr: result.stderr };
         },

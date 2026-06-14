@@ -4,6 +4,8 @@ import { parsedKeyToTmuxKey } from "../terminal/keymap.js";
 import { createSnapshot } from "../terminal/terminal-snapshot.js";
 import { detectRiskSignals } from "../terminal/confirm-detection.js";
 import { calculatePollDelay, checkScreenStable, checkTextMatch, hashScreen } from "../terminal/wait.js";
+import { validateRegexSafety } from "../terminal/command-safety.js";
+import { TerminalUseError } from "../terminal/errors.js";
 import { TranscriptRecorder } from "../terminal/transcript.js";
 import { generateSessionId } from "../terminal/ids.js";
 import { mouseClickToTmuxSequence, mouseScrollToTmuxSequence, validateMouseCoords } from "../terminal/mouse.js";
@@ -331,7 +333,13 @@ export class TmuxProvider {
         const snapshot = await this.snapshot(sessionId, includeScrollback === true ? "full" : "viewport");
         const lines = snapshot.screen.split("\n");
         const results = [];
-        const re = regex === true ? new RegExp(pattern, "gu") : undefined;
+        const re = regex === true ? (() => {
+            const validation = validateRegexSafety(pattern);
+            if (!validation.ok) {
+                throw new TerminalUseError({ code: "UNSAFE_REGEX", message: validation.reason, retryable: false });
+            }
+            return new RegExp(pattern, "gu");
+        })() : undefined;
         for (let row = 0; row < lines.length; row += 1) {
             const line = lines[row];
             if (regex === true && re !== undefined) {

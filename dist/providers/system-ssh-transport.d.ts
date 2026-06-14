@@ -23,6 +23,12 @@ export type ExecSshCommandOptions = {
     connectTimeoutMs?: number;
     /** 本地 execFile 总超时，防止远程 tmux 命令无限挂起。 */
     execTimeoutMs?: number;
+    /**
+     * 指定 UserKnownHostsFile 路径（来自 profile.knownHosts）。
+     * 传入时额外设置 GlobalKnownHostsFile=/dev/null，
+     * 确保只从指定文件校验 host key，避免全局 known_hosts 干扰。
+     */
+    knownHosts?: string;
 };
 export type SystemSshCommandResult = {
     stdout: string;

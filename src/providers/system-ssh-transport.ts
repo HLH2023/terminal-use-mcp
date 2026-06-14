@@ -38,6 +38,12 @@ export type ExecSshCommandOptions = {
   connectTimeoutMs?: number
   /** 本地 execFile 总超时，防止远程 tmux 命令无限挂起。 */
   execTimeoutMs?: number
+  /**
+   * 指定 UserKnownHostsFile 路径（来自 profile.knownHosts）。
+   * 传入时额外设置 GlobalKnownHostsFile=/dev/null，
+   * 确保只从指定文件校验 host key，避免全局 known_hosts 干扰。
+   */
+  knownHosts?: string
 }
 
 export type SystemSshCommandResult = {
@@ -148,6 +154,13 @@ function buildBaseSshArgs(target: SystemSshTarget, options: ExecSshCommandOption
     "-o",
     "BatchMode=yes",
   )
+
+  // knownHosts: 传入时设置 UserKnownHostsFile 并将 GlobalKnownHostsFile 指向 /dev/null，
+  // 确保只从指定文件校验 host key，避免全局 /etc/ssh/ssh_known_hosts 干扰。
+  if (options.knownHosts !== undefined && options.knownHosts.trim().length > 0) {
+    sshArgs.push("-o", `UserKnownHostsFile=${options.knownHosts.trim()}`)
+    sshArgs.push("-o", "GlobalKnownHostsFile=/dev/null")
+  }
 
   if (target.proxyJump !== undefined && target.proxyJump.trim().length > 0) {
     sshArgs.push("-o", `ProxyJump=${target.proxyJump.trim()}`)

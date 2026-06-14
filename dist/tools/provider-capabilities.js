@@ -14,7 +14,7 @@ export function registerProviderCapabilitiesTool(server, providers) {
     server.registerTool("terminal.provider_capabilities", {
         description: "Return the declared capability matrix for a terminal provider",
         inputSchema: {
-            provider: z.enum(["native-pty", "tmux"]),
+            provider: z.enum(["native-pty", "tmux", "ssh-pty", "ssh-tmux"]),
         },
     }, async (input) => {
         try {

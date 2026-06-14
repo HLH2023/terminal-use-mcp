@@ -32,6 +32,7 @@ import type { MouseClickEvent, MouseScrollEvent } from "../terminal/mouse.js"
 import { createSnapshot } from "../terminal/terminal-snapshot.js"
 import { detectRiskSignals } from "../terminal/confirm-detection.js"
 import { calculatePollDelay, checkScreenStable, checkTextMatch, hashScreen } from "../terminal/wait.js"
+import { validateRegexSafety } from "../terminal/command-safety.js"
 import type { ScreenState } from "../terminal/wait.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
 import { generateSessionId } from "../terminal/ids.js"
@@ -131,6 +132,7 @@ export async function execSshTmux(
     keyFile,
     connectTimeoutMs: profile.connectTimeoutMs,
     execTimeoutMs: options?.timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
+    knownHosts: profile.knownHosts !== undefined ? expandUserPath(profile.knownHosts) : undefined,
   })
 }
 
@@ -498,7 +500,13 @@ export class SshTmuxProvider implements TerminalProvider {
     const snapshot = await this.snapshot(session.tmuxId)
     const lines = snapshot.screen.split("\n")
     const results: FindResult[] = []
-    const re = regex ? new RegExp(pattern, "gu") : undefined
+    const re = regex ? (() => {
+      const validation = validateRegexSafety(pattern)
+      if (!validation.ok) {
+        throw new TerminalUseError({ code: "UNSAFE_REGEX", message: validation.reason, retryable: false })
+      }
+      return new RegExp(pattern, "gu")
+    })() : undefined
 
     for (let row = 0; row < lines.length; row += 1) {
       const line = lines[row]
@@ -917,6 +925,7 @@ function createCapabilityTransport(target: ResolvedSshTarget): SystemSshTranspor
         keyFile,
         connectTimeoutMs: target.connectTimeoutMs,
         execTimeoutMs: timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
+        knownHosts: target.knownHosts !== undefined ? expandUserPath(target.knownHosts) : undefined,
       })
       return { stdout: result.stdout, stderr: result.stderr }
     },

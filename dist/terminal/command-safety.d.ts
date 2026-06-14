@@ -113,3 +113,20 @@ export declare function isCommandSafe(command: string, allowedCommands?: string[
  */
 export declare function isCwdAllowed(cwd: string, workspaceRoot?: string, allowedCwdRoots?: string[]): Promise<CwdSafetyResult>;
 export { isSubdirectory, isSubdirectoryCanonical, normalizePathForComparison };
+/** 用户正则表达式最大允许长度（字符数） */
+export declare const MAX_REGEX_LENGTH = 500;
+export type RegexValidationResult = {
+    ok: true;
+} | {
+    ok: false;
+    reason: string;
+};
+/**
+ * 对用户提供的正则表达式做安全验证，防止 ReDoS。
+ *
+ * 1. 长度截断：超过 MAX_REGEX_LENGTH 直接拒绝
+ * 2. 嵌套量词启发式：检测经典 ReDoS 模式，warn 但仍允许（降低误报影响）
+ *
+ * 注意：该函数不验证正则语法——语法错误交给 new RegExp() 自行抛出。
+ */
+export declare function validateRegexSafety(pattern: string): RegexValidationResult;

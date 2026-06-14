@@ -5,6 +5,8 @@
  * 这样可以让 native-pty / tmux / SSH Provider 复用同一套判定逻辑。
  */
 
+import { validateRegexSafety } from "./command-safety.js"
+
 /** waitForText 选项 */
 export type WaitForTextOptions = {
   /** 要匹配的文本 */
@@ -65,6 +67,10 @@ export function checkTextMatch(
   const caseSensitive = options.caseSensitive ?? true
 
   if (options.regex === true) {
+    const validation = validateRegexSafety(options.text)
+    if (!validation.ok) {
+      return { matched: false, reason: validation.reason }
+    }
     const flags = caseSensitive ? "" : "i"
     const matched = new RegExp(options.text, flags).test(screen)
     return matched

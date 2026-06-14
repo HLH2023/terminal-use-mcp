@@ -12,7 +12,7 @@ This skill is designed to be **trimmed to your needs**. Each section is self-con
 | §1 What This Tool Is For | Purpose, when to use/not use | ⚠️ Keep — essential for correct tool usage |
 | §2 Provider Selection | native-pty vs tmux choice, provider availability | ✅ Remove if you always use native-pty |
 | §3 Standard Operation Loop | Core workflow (snapshot → act → wait) | ⚠️ Keep — critical for correct operation |
-| §4 Tool Quick Reference | Parameter tables for all 22 tools | ✅ Remove if your AI already knows the tool schemas |
+| §4 Tool Quick Reference | Parameter tables for all available tools | ✅ Remove if your AI already knows the tool schemas |
 | §5 Available Key Names | Key name list | ✅ Remove — AI can call `terminal.keys` instead |
 | §6 Safety Rules | 6 non-negotiable safety rules | ⚠️ Keep — prevents credential exposure and data loss |
 | §7 Common Patterns | 7 usage patterns with examples | ✅ Remove largest section (~130 lines) if your AI learns by doing |
@@ -484,6 +484,7 @@ Add the following to your MCP configuration (e.g., `mcp.json` or equivalent):
 | `TERMINAL_USE_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 | `TERMINAL_USE_HOSTS_CONFIG` | XDG config dir / hosts.json (profiles/*.json takes priority) | Path to SSH host profiles configuration file |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set — denied)_ | Set to `1` to allow inline SSH host specification in tool calls |
+| `TERMINAL_USE_STORE_RAW_TRANSCRIPT` | _(not set — only redacted)_ | Set to `1` to also save raw (unredacted) transcript files |
 
 #### Path Overrides
 
@@ -735,7 +736,7 @@ Query detailed information about a specific target.
 
 ### terminal.verify_target
 
-Verify that an SSH target is reachable, the host key is valid, and auth works.
+Verify SSH target local readiness (profile, host key, auth) without opening an SSH connection.
 
 | Field | Description |
 |-------|-------------|

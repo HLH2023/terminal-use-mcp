@@ -63,6 +63,7 @@ import { createSnapshot } from "../terminal/terminal-snapshot.js"
 import type { Highlight, TerminalSnapshot } from "../terminal/terminal-snapshot.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
 import { calculatePollDelay, checkScreenStable, checkTextMatch, hashScreen } from "../terminal/wait.js"
+import { validateRegexSafety } from "../terminal/command-safety.js"
 import type { ScreenState } from "../terminal/wait.js"
 import { XtermAdapter } from "../terminal/xterm-adapter.js"
 import { safeCleanup } from "../terminal/safe-cleanup.js"
@@ -448,6 +449,10 @@ export class SshPtyProvider implements TerminalProvider {
     const results: FindResult[] = []
 
     if (regex === true) {
+      const validation = validateRegexSafety(pattern)
+      if (!validation.ok) {
+        throw new TerminalUseError({ code: "UNSAFE_REGEX", message: validation.reason, retryable: false })
+      }
       const expression = new RegExp(pattern, "g")
       for (let row = 0; row < lines.length; row += 1) {
         for (const match of lines[row].matchAll(expression)) {

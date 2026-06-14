@@ -30,6 +30,8 @@ export type TerminalUseConfig = {
     sshDefaults: SshDefaultsConfig;
     /** 启用的 provider 白名单。未设置=全部启用 */
     enabledProviders: ProviderName[];
+    /** 是否保存原始（未脱敏）transcript 文件。默认 false — 只保存脱敏版防止泄露秘密。 */
+    storeRawTranscript: boolean;
 };
 export type SshDefaultsConfig = {
     remoteDeniedCwd: string[];

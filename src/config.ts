@@ -40,6 +40,8 @@ export type TerminalUseConfig = {
   sshDefaults: SshDefaultsConfig
   /** 启用的 provider 白名单。未设置=全部启用 */
   enabledProviders: ProviderName[]
+  /** 是否保存原始（未脱敏）transcript 文件。默认 false — 只保存脱敏版防止泄露秘密。 */
+  storeRawTranscript: boolean
 }
 
 export type SshDefaultsConfig = {
@@ -183,6 +185,7 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
     logLevel: (env.TERMINAL_USE_LOG_LEVEL as TerminalUseConfig["logLevel"]) ?? local?.logLevel ?? "info",
     hostsConfigPath: env.TERMINAL_USE_HOSTS_CONFIG,
     allowInlineSshTargets: env.TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS === "1",
+    storeRawTranscript: env.TERMINAL_USE_STORE_RAW_TRANSCRIPT === "1",
     sshDefaults: {
       remoteDeniedCwd: sshDefaults?.remoteDeniedCwd ?? ["/", "/root", "/etc", "/boot", "/proc", "/sys"],
       allowTmux: sshDefaults?.allowTmux ?? true,

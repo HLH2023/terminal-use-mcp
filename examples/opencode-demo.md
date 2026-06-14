@@ -6,7 +6,7 @@ shut down.
 
 ## Prerequisites
 
-- OpenCode configured with the terminal-use-mcp server (see `mcp.json.example`)
+- OpenCode configured with the terminal-use-mcp server (see `mcp.jsonc.example`)
 - Node.js installed
 
 ## Workflow

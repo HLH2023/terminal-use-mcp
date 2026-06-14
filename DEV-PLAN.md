@@ -208,7 +208,7 @@ tools/local/terminal-use-mcp/
       SKILL.md
 
   examples/
-    mcp.json.example
+    mcp.jsonc.example
     codex-demo.md
     claude-code-demo.md
     opencode-demo.md

@@ -344,7 +344,10 @@ export class SessionManager {
         this.runBestEffortArtifactWrite("persist session artifacts", session.sessionId, () => {
             paths = ensureSessionArtifactDir(this.config.artifactDir, session.sessionId);
             writeJsonFile(paths.sessionFile, this.toTerminalSession(session));
-            writeFileSync(paths.transcriptFile, session.transcript.export("text"), "utf8");
+            // 只在显式启用时写入原始 transcript（可能含秘密），默认仅写脱敏版
+            if (this.config.storeRawTranscript) {
+                writeFileSync(paths.transcriptFile, session.transcript.export("text"), "utf8");
+            }
             writeFileSync(paths.transcriptRedactedFile, session.transcript.export("text", { redact: true }), "utf8");
             appendNdjsonLine(paths.eventsFile, {
                 timestamp: new Date().toISOString(),

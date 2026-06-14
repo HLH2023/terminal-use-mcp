@@ -117,6 +117,7 @@ export function loadConfig(overrides) {
         logLevel: env.TERMINAL_USE_LOG_LEVEL ?? local?.logLevel ?? "info",
         hostsConfigPath: env.TERMINAL_USE_HOSTS_CONFIG,
         allowInlineSshTargets: env.TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS === "1",
+        storeRawTranscript: env.TERMINAL_USE_STORE_RAW_TRANSCRIPT === "1",
         sshDefaults: {
             remoteDeniedCwd: sshDefaults?.remoteDeniedCwd ?? ["/", "/root", "/etc", "/boot", "/proc", "/sys"],
             allowTmux: sshDefaults?.allowTmux ?? true,

@@ -406,6 +406,7 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` | `info` |
 | `TERMINAL_USE_HOSTS_CONFIG` | Path to SSH host profiles configuration file | XDG config dir / hosts.json (profiles/*.json takes priority) |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | Set to `1` to allow inline SSH host specification in tool calls | _(not set — denied)_ |
+| `TERMINAL_USE_STORE_RAW_TRANSCRIPT` | Set to `1` to also save raw (unredacted) transcript files | _(not set — only redacted)_ |
 
 #### Path Overrides
 
@@ -486,7 +487,7 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 |------|---------|
 | `terminal.targets` | List available targets (local + SSH) |
 | `terminal.target_info` | Query target details (redacted) |
-| `terminal.verify_target` | Verify SSH target connectivity |
+| `terminal.verify_target` | Verify SSH target local readiness preflight |
 
 ### Tmux Management (2 tools)
 

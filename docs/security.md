@@ -20,7 +20,7 @@ terminal-use-mcp is not a sandbox. Security policies restrict the entry point, n
 Startup command deny list:
 
 ```
-sudo, su, ssh, scp, sftp, rm, dd, mkfs,
+sudo, su, sh, ssh, scp, sftp, rm, dd, mkfs,
 shutdown, reboot, chmod, chown, curl, wget,
 nc, ncat, telnet
 ```

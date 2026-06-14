@@ -4,6 +4,7 @@
  * 本文件只包含纯函数：调用者负责提供当前屏幕状态、维护轮询循环和处理超时。
  * 这样可以让 native-pty / tmux / SSH Provider 复用同一套判定逻辑。
  */
+import { validateRegexSafety } from "./command-safety.js";
 const DEFAULT_IDLE_MS = 500;
 const MIN_POLL_INTERVAL_MS = 20;
 const MAX_DEFAULT_POLL_INTERVAL_MS = 100;
@@ -18,6 +19,10 @@ const MAX_DEFAULT_POLL_INTERVAL_MS = 100;
 export function checkTextMatch(screen, options) {
     const caseSensitive = options.caseSensitive ?? true;
     if (options.regex === true) {
+        const validation = validateRegexSafety(options.text);
+        if (!validation.ok) {
+            return { matched: false, reason: validation.reason };
+        }
         const flags = caseSensitive ? "" : "i";
         const matched = new RegExp(options.text, flags).test(screen);
         return matched

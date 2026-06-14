@@ -135,6 +135,31 @@ describe("system ssh transport", () => {
     expect(quoteRemoteArg("a b;c$(rm)")).toBe("'a b;c$(rm)'")
     expect(quoteRemoteArg("it's ok")).toBe("'it'\"'\"'s ok'")
   })
+
+  it("knownHosts 生成 UserKnownHostsFile 和 GlobalKnownHostsFile=/dev/null", () => {
+    const args = buildSshCommandArgs(
+      { host: "example.test", port: 22, username: "tester" },
+      ["tmux", "-V"],
+      { knownHosts: "/home/tester/.ssh/known_hosts" },
+    )
+
+    expect(args).toContain("UserKnownHostsFile=/home/tester/.ssh/known_hosts")
+    expect(args).toContain("GlobalKnownHostsFile=/dev/null")
+    // UserKnownHostsFile 必须在 host 参数之前
+    expect(args.indexOf("UserKnownHostsFile=/home/tester/.ssh/known_hosts")).toBeLessThan(
+      args.indexOf("tester@example.test"),
+    )
+  })
+
+  it("未传 knownHosts 时不生成 UserKnownHostsFile 参数", () => {
+    const args = buildSshCommandArgs(
+      { host: "example.test", port: 22, username: "tester" },
+      ["tmux", "-V"],
+    )
+
+    expect(args.some((a) => a.startsWith("UserKnownHostsFile="))).toBe(false)
+    expect(args).not.toContain("GlobalKnownHostsFile=/dev/null")
+  })
 })
 
 describe("SshTmuxProvider", () => {

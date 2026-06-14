@@ -642,7 +642,7 @@ supportsFullscreenDetection: false
 
 ### 8.3 `terminal.verify_target`
 
-验证 SSH target 是否可连接。
+验证 SSH target 的本地前置条件（profile 存在性、known_hosts 格式、认证材料可访问性），不建立 SSH 连接。
 
 输入：
 

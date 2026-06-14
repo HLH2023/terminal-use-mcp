@@ -52,6 +52,11 @@ const DEFAULT_DENIED_CWD_ROOTS = process.platform === "win32"
 // 注意：该正则只用于判断"是否需要交给 shell 解析"，安全判定仍必须基于包装前的原始命令。
 export const SHELL_METACHAR_REGEX = /[\s|;&<>()$`\\'"!]/
 
+// Shell chain 操作符：用于将复合命令拆分为独立子命令，逐个做 denylist 检查。
+// 匹配顺序：长操作符优先（|| 在 | 之前，|& 在 | 之前），避免误拆。
+// 匹配项：;  &&  ||  |&  |  反引号 `  $( 
+const SHELL_CHAIN_REGEX = /;|&&|\|\||\|&|\||`|\$\(/g
+
 // 已知 shell/进程包装命令：这些命令自身不一定危险，但会把真正要执行的
 // 子命令放在后续参数里。安全检查需要剥掉外层包装，避免 `env rm`、
 // `busybox sh`、`nohup rm` 等形式绕过 denylist。
@@ -451,6 +456,34 @@ export function isCommandSafeArgv(
   let baseCommand: string
   if (args.length === 0 && SHELL_METACHAR_REGEX.test(command)) {
     baseCommand = extractBaseCommand(command)
+
+    // Shell chain bypass 防御：当 command 含 chain 操作符（; && || | |& ` $() ）时，
+    // 只检查第一个子命令不够——后续子命令可能含被拒命令。
+    // 拆分 command 为子命令片段，逐个做 denylist 检查。
+    if (SHELL_CHAIN_REGEX.test(command)) {
+      // 重置 regex lastIndex（因为带 g flag）
+      SHELL_CHAIN_REGEX.lastIndex = 0
+      const subCommands = command.split(SHELL_CHAIN_REGEX).filter((s) => s.trim().length > 0)
+      const deniedSet = buildDeniedSet(deniedCommands)
+      const allowedSet = buildAllowedSet(allowedCommands)
+      for (const sub of subCommands) {
+        const subBase = extractBaseCommand(sub).toLowerCase()
+        if (allowedSet.has(subBase)) {
+          continue
+        }
+        if (deniedSet.has(subBase)) {
+          if (riskyMode === "ask") {
+            return { ok: false, reason: `Command "${subBase}" in shell chain requires user confirmation`, code: "CONFIRMATION_REQUIRED" }
+          }
+          if (riskyMode === "allow") {
+            continue
+          }
+          return { ok: false, reason: `Command "${subBase}" in shell chain is blocked by safety policy`, code: "UNSAFE_COMMAND" }
+        }
+      }
+      // chain 中所有子命令均通过 denylist 检查，直接放行
+      return { ok: true }
+    }
   } else {
     baseCommand = extractBaseCommandArgv([command, ...args])
   }
@@ -609,3 +642,49 @@ export async function isCwdAllowed(
 
 // 导出供测试使用
 export { isSubdirectory, isSubdirectoryCanonical, normalizePathForComparison }
+
+// ============================================================
+// 正则表达式 ReDoS 防护
+// ============================================================
+
+/** 用户正则表达式最大允许长度（字符数） */
+export const MAX_REGEX_LENGTH = 500
+
+/**
+ * 嵌套量词 ReDoS 启发式检测。
+ *
+ * 检测形如 `(…+)+`、`(…*)*`、`(…{n,m})+` 的嵌套量词模式，
+ * 这是经典 ReDoS 攻击的构造方式。
+ * 该检测为 conservative — 可能产生少量误报，但不允许漏过典型攻击。
+ */
+const NESTED_QUANTIFIER_RE = /\([^)]*[+*{][^)]*\)[+*{]/
+
+export type RegexValidationResult =
+  | { ok: true }
+  | { ok: false; reason: string }
+
+/**
+ * 对用户提供的正则表达式做安全验证，防止 ReDoS。
+ *
+ * 1. 长度截断：超过 MAX_REGEX_LENGTH 直接拒绝
+ * 2. 嵌套量词启发式：检测经典 ReDoS 模式，warn 但仍允许（降低误报影响）
+ *
+ * 注意：该函数不验证正则语法——语法错误交给 new RegExp() 自行抛出。
+ */
+export function validateRegexSafety(pattern: string): RegexValidationResult {
+  if (pattern.length > MAX_REGEX_LENGTH) {
+    return {
+      ok: false,
+      reason: `正则表达式长度 ${pattern.length} 超过上限 ${MAX_REGEX_LENGTH}，拒绝执行以防 ReDoS`,
+    }
+  }
+
+  if (NESTED_QUANTIFIER_RE.test(pattern)) {
+    // 嵌套量词是可疑模式但非绝对恶意，仅 warn 不拒绝
+    // 实际执行中如果真的卡住，进程超时机制会兜底
+    // eslint-disable-next-line no-console
+    console.warn(`[terminal-use] 正则表达式含嵌套量词，可能造成 ReDoS: ${pattern.slice(0, 80)}...`)
+  }
+
+  return { ok: true }
+}

