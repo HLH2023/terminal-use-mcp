@@ -1,186 +1,470 @@
-# terminal-use-mcp 远程 SSH 终端支持 — 架构探讨
+# Remote SSH Architecture
 
-> 探讨日期: 2026-06-13
-> 状态: 待用户决策，不绑定大任务，工具分支内实现
+> Reference document for the implemented SSH terminal provider system.
 
-## 核心问题
+## 1. Architecture Overview
 
-当前 MCP 架构是**纯本地模型** — 所有 Provider 假设进程在本机执行。远程 SSH 需要「连接上下文」这一层，当前设计中不存在。
+terminal-use-mcp provides four terminal providers registered via `ProviderRegistry`:
 
-## 当前架构的本地假设清单
+| Provider | Scope | Transport |
+|----------|-------|-----------|
+| `native-pty` | Local | `node-pty` direct PTY spawn |
+| `tmux` | Local | System `tmux` binary via `execFile` |
+| `ssh-pty` | Remote | `ssh2` library PTY channel |
+| `ssh-tmux` | Remote | System `ssh` binary + remote `tmux` |
 
-### 接口层
-- `ProviderName = "native-pty" | "tmux"` — 无远程 provider
-- `StartInput.cwd` / `TerminalSession.cwd` — 本地路径语义
-- `StartInput` 无 `host/port/user/sshKeyPath` 等连接字段
-- `TerminalSession` 无 `host` 远程主机元数据
+Auto-selection logic:
 
-### 实现层
-| 文件 | 行号 | 本地假设 |
-|------|------|----------|
-| `native-pty-provider.ts` | 10-13, 130-136 | 直接 `node-pty spawn()`，只能本机起子进程 |
-| `native-pty-provider.ts` | 160-179 | 数据来自本地 PTY onData/onExit |
-| `native-pty-provider.ts` | 283-295 | 输入直接写入本地 pty |
-| `tmux-provider.ts` | 98-104, 118-135 | `execFile("tmux", ...)` 依赖本机 tmux 二进制 |
-| `tmux-provider.ts` | 185, 556 | attach/list cwd 用 `process.cwd()` |
-| `tmux-provider.ts` | 448-465 | set-environment/clear-environment 是本地 tmux 环境操作 |
+```
+target.kind === "local"  → native-pty (fallback tmux)
+target.kind === "ssh"    → ssh-pty   (fallback ssh-tmux)
+```
 
-### 安全/配置层
-| 文件 | 行号 | 本地假设 |
-|------|------|----------|
-| `command-safety.ts` | 18-24, 67-107 | cwd 按本地 workspaceRoot 校验，远程 cwd 会误判 |
-| `session-manager.ts` | 357-384 | 命令安全和 cwd 安全校验是本地工作区模型 |
-| `config.ts` | 31-49 | 无 SSH host/user/key/port 配置项 |
-| `artifacts.ts` | 37-116 | 文件写入本地磁盘 |
-| `export-transcript.ts` | 34-53 | transcript 导出到本地文件 |
+Data flow:
 
-### 工具/枚举层 (机械改动点)
-| 文件 | 行号 | 硬编码 |
-|------|------|--------|
-| `start.ts` | 20-24 | provider 输入枚举只有 3 个 |
-| `attach.ts` | 16-18 | attach 枚举只有 3 个 |
-| `provider-capabilities.ts` | 27-29 | capabilities tool provider enum 硬编码 |
-| `health.ts` | 27-28 | health 检查 provider 名单硬编码 |
-| `provider-registry.ts` | 21-27 | 只注册 3 个 provider |
+```
+Agent → MCP Client → [stdio] → terminal-use-mcp
+                                   │
+                    ┌──────────────┼──────────────┐
+                    ▼              ▼              ▼
+              native-pty       ssh-pty         ssh-tmux
+              (local)      (ssh2 channel)   (system ssh)
+                    │              │              │
+                    ▼              ▼              ▼
+              Local PTY    Remote PTY      Remote tmux
+              process      on SSH host     on SSH host
+```
+
+Source: `src/providers/provider-registry.ts`
 
 ---
 
-## 三种架构路径
+## 2. ssh-pty Provider
 
-### 方案 A: 新增 SshProvider (推荐主路径)
+The `ssh-pty` provider uses the `ssh2` Node.js library to establish an SSH connection and open a remote PTY channel. It shares the same observation/input model as `native-pty`: remote channel output is fed into `XtermAdapter`, enabling snapshot, highlight detection, transcript, and wait operations.
 
-**模式**: 本机 MCP + ssh2 远程 PTY channel
+### Connection
 
-```
-Agent → MCP Client → [stdio] → terminal-use-mcp (本机)
-                                        ↓ ssh2 Client
-                                   Remote Host PTY
-```
-
-**优点**:
-- 最小改动，单进程部署
-- session 模型完全复用
-- ssh2 的 `requestPty()` + `shell()` 提供完整交互 PTY
-- 和现有 NativePtyProvider 共享 xterm-adapter 解析逻辑
-
-**缺点**:
-- 凭据安全风险 — MCP 进程可访问所有 SSH key
-- 单进程是单点 — MCP 挂了所有远程 session 断
-
-**实现要项**:
-- 新文件 `src/providers/ssh-pty-provider.ts`
-- 核心: `ssh2.Client.connect()` → `client.shell({pty:{...}})` → channel
-- `type/press/paste` → `channel.write()`
-- `snapshot` → xterm-adapter 解析 channel data 事件 (和 NativePty 一致)
-- `kill` → `channel.close()` + `client.end()`
-
-**需要改的地方**:
-
-| 层 | 改动 |
-|----|------|
-| 接口 | `ProviderName` 加 `"ssh-pty"`；`StartInput` 加 host/port/user/sshKeyPath/sshAgent (或 `RemoteStartInput extends StartInput`)；`TerminalSession` 加 `host?: string` |
-| 实现 | 新 SshProvider，复用 xterm-adapter 解析，channel 替代 pty |
-| 安全 | SshProvider 内跳过 `isCwdAllowed()` 本地校验；凭据走 ssh-agent/key file |
-| 配置 | `TerminalUseConfig` 加 `sshHosts: SshHostConfig[]`；环境变量 `TERMINAL_USE_SSH_*` |
-| 工具 | 所有 `z.enum(...)` 加 `"ssh-pty"`；health/capabilities/registry 注册新 provider |
-| artifact | 无需大改 — channel data 流过来后本地解析落盘 |
-
-### 方案 B: Remote-agent 架构 (重型)
-
-**模式**: 每台远端装 MCP，本机做路由
-
-```
-Agent → MCP Client → [stdio] → terminal-use-mcp (本机/路由)
-                        ↓ HTTP/SSE        ↓ HTTP/SSE
-                Remote MCP 1        Remote MCP 2
-              (远端主机 A)         (远端主机 B)
+```typescript
+// src/providers/ssh-pty-provider.ts
+const client = new ssh2.Client()
+client.connect({
+  host, port, username,
+  agent: resolvedAuth.socket,      // ssh-agent
+  privateKey: keyBuffer,           // key-file (read into memory, never logged)
+  passphrase: envValue,            // optional, from env var reference only
+  readyTimeout: connectTimeoutMs,
+  keepaliveInterval: keepaliveMs,
+})
 ```
 
-**优点**:
-- 天然安全隔离 — 凭据不过网
-- 支持多人协作、浏览器可见
-- 单点故障不会全挂
+### Remote Command Execution
 
-**缺点**:
-- 每台主机都要安装维护 MCP server
-- 架构复杂度高 — 需要路由、分布式 session owner、反向代理信任
-- 适合长生命周期管理主机，不适合临时连一台
+The provider opens an exec channel with PTY allocation:
 
-**参考**: `Zw-awa/ssh-session-mcp` — 有 REMOTE_OWNER、publicBaseUrl、trusted reverse proxy
-
-### 方案 C: SSH 透传 tmux (最轻量)
-
-**模式**: 把 `execFile("tmux", ...)` 替换为 `execFile("ssh", ["-t", "user@host", "tmux", ...])`
-
-```
-Agent → MCP Client → [stdio] → terminal-use-mcp (本机)
-                                        ↓ ssh -t
-                                   Remote Host tmux
+```typescript
+client.exec(remoteCommand, { pty: { term, cols, rows }, env, ... })
 ```
 
-**优点**:
-- 零安装远端 — 只要远端有 tmux
-- tmux session 持久化 — SSH 断了 session 不丢
-- 改动极小 — 本质是给 TmuxProvider 加个 SSH 传输前缀
+The remote command is constructed as:
 
-**缺点**:
-- 只能操作远端已有 tmux session，不能 start 新的裸 PTY
-- `ssh -t` 的 PTY 输出解析不稳定 — 网络卡顿时输出碎片化
-- 每个操作一次 ssh 连接开销（除非用 ControlMaster 复用）
-
-**参考命令**:
 ```bash
-ssh -t user@host "tmux new-session -s NAME -d 'bash'"
-ssh -t user@host "tmux send-keys -t NAME 'echo hello' Enter"
-ssh -t user@host "tmux capture-pane -t NAME -p"
-ssh -t user@host "tmux kill-session -t NAME"
+exec $SHELL -l -ic 'cd <cwd> && exec <command> <args...>'
 ```
 
----
+This ensures the remote shell loads the user's profile (`.bashrc`, `.zshrc`, etc.) and `cd`s to the requested working directory before executing the command.
 
-## 安全要点 (跨方案通用)
+Source: `src/providers/ssh-pty-provider.ts` → `buildRemoteExecCommand()`
 
-1. **Host key 校验** — 必须用 `~/.ssh/known_hosts`，禁止 `StrictHostKeyChecking=no`
-   - 反例: `mcp-ssh` 默认关闭 host key 校验，不适合生产
-   - 正例: `ssh-mcp` (n0madic) 默认开 known_hosts 校验
+### Capabilities
 
-2. **凭据管理** — 优先级排序:
-   - `ssh-agent` / `SSH_AUTH_SOCK` (最安全，MCP 不接触私钥)
-   - `~/.ssh/id_*` 指定 key 文件路径 (MCP 读路径，不读内容)
-   - 密码 **永远不**存入配置文件或环境变量
+| Capability | Value | Notes |
+|------------|-------|-------|
+| Highlights | **Yes** | Full xterm-adapter pipeline: ANSI SGR → cell buffer → highlight regions |
+| Scrollback | Best-effort | Limited to current xterm buffer; not complete remote scrollback |
+| Mouse | Yes | SGR-1006 click + scroll sequences written to channel |
+| Disconnect recovery | **No** | Session dies when SSH connection drops |
+| Attach | **No** | Each session is a new SSH exec channel |
+| Rename | **No** | Session ID is immutable |
 
-3. **远端暴露** — 如果 MCP 本身要对外提供:
-   - HTTP 模式加 bearer token / trusted proxy
-   - 参考 `ssh-session-mcp` 的分布式模式
+### Session Lifecycle
 
----
+1. **Resolve target** — Lookup SSH profile by name from `hosts.json`
+2. **Resolve auth** — ssh-agent socket or key-file path
+3. **Verify host key** — Check against `known_hosts` or pinned fingerprint
+4. **Connect** — `ssh2.Client.connect()` with resolved auth
+5. **Open exec channel** — `client.exec(command, { pty, env })`
+6. **Pipe output** — Channel `data` events → `XtermAdapter.write()`
+7. **Interact** — `channel.write()` for key/type/paste/mouse input
+8. **Observe** — Snapshot/wait/find via xterm-adapter, same as native-pty
+9. **Kill** — `channel.close()` + `client.end()`
 
-## 已有参考项目
-
-| 项目 | 语言 | 模式 | 关键能力 | 安全水平 |
-|------|------|------|----------|----------|
-| [n0madic/ssh-mcp](https://github.com/n0madic/ssh-mcp) | Go | ssh2 + PTY + SFTP + tunnel | 连接池、ssh-agent 优先、known_hosts | ✅ 高 |
-| [xiongjiwei/mcp-ssh](https://github.com/xiongjiwei/mcp-ssh) | Go | 系统 ssh 子进程 | 简单，`-T` 无 PTY | ⚠️ 低 (关 host key) |
-| [Zw-awa/ssh-session-mcp](https://github.com/Zw-awa/ssh-session-mcp) | TS | 分布式 owner 路由 + 浏览器 viewer | 多人协作、反向代理 | ✅ 中高 |
-| [mkpvishnu/terminal-mcp](https://github.com/mkpvishnu/terminal-mcp) | Python | 通用 PTY 容器 | SSH 只是 session 里跑的命令 | 中 |
-
-npm 侧同类包: `mcp-server-ssh`, `@zibdie/ssh-mcp-server`, `@fangjunjie/ssh-mcp-server`, `@alolite/ssh-mcp`, `@xuyehua/remote-terminal-mcp` (质量参差)
-
----
-
-## 推荐: A (SshProvider) + C (tmux fallback)
-
-主路径用 **ssh2 PTY channel** 获得完整交互能力，退路用 **tmux attach** 处理持久化共享场景。两条路径都在同一 SshProvider 内实现:
-
-- `start({host, ...})` 默认走 ssh2 PTY channel (方案 A)
-- `start({host, ..., attachTmux: "session-name"})` 走 tmux 模式 (方案 C)
-- 两种模式共享 `host/port/user/key` 连接配置
+Source: `src/providers/ssh-pty-provider.ts` — `start()`, `kill()`
 
 ---
 
-## 待用户决策
+## 3. ssh-tmux Provider
 
-1. SshProvider 的连接配置放在哪 — 环境变量 vs mcp.json 传参 vs 新配置文件?
-2. tmux fallback 是否作为第一阶段就必须实现?
-3. 是否需要方案 B (多主机路由) 的预留接口?
-4. ssh2 vs 系统 ssh 子进程的偏好 — ssh2 更可控，系统 ssh 更通用?
+The `ssh-tmux` provider uses the system `ssh` binary to execute tmux commands on a remote host. All tmux operations (create, send-keys, capture-pane, kill-session, etc.) are forwarded through SSH. Sessions persist on the remote host and survive disconnects.
+
+### Transport
+
+All operations go through `SystemSshTransport`:
+
+```typescript
+execFile("ssh", [
+  "-i", keyFile,                    // (optional) key-file auth
+  "-p", String(port),
+  "-o", "StrictHostKeyChecking=yes",
+  "-o", `ConnectTimeout=${seconds}`,
+  "-o", "BatchMode=yes",
+  `${username}@${host}`,
+  "--",
+  ...remoteArgs.map(quoteRemoteArg),  // POSIX single-quote escaping
+])
+```
+
+Source: `src/providers/system-ssh-transport.ts` → `execSshCommand()`
+
+### Remote Command Construction
+
+For new tmux sessions, the shell command is:
+
+```bash
+exec $SHELL -l -ic 'exec <command> <args...>'
+```
+
+This is passed to `tmux new-session -d '<shell-command>'` on the remote host.
+
+Source: `src/providers/ssh-tmux-provider.ts` → `buildLoginInteractiveShellCommand()`
+
+### Capabilities
+
+| Capability | Value | Notes |
+|------------|-------|-------|
+| Highlights | **Yes** | Snapshot-mode: `capture-pane -e` returns ANSI SGR, parsed by xterm-adapter |
+| Scrollback | Best-effort | Limited by `capture-pane -S -N` history depth |
+| Mouse | **Yes** | tmux mouse events via `send-keys` |
+| Disconnect recovery | **Yes** | tmux session persists on remote host |
+| Attach | **Yes** | Re-attach to existing tmux session |
+| Rename | **Yes** | tmux `rename-session` |
+
+> **Note on highlight implementation**: Unlike `ssh-pty` which streams data into xterm-adapter in real time, `ssh-tmux` takes periodic `capture-pane -e` snapshots and parses the full ANSI output into the xterm buffer. Both approaches produce the same highlight/snapshot output, but the underlying mechanism differs (streaming vs. snapshot).
+
+### Session Lifecycle
+
+1. **Resolve target** — Lookup SSH profile by name
+2. **Validate CWD** — Remote CWD policy check (local, no SSH yet)
+3. **Create session** — `ssh <host> tmux new-session -d -s <name> '<command>'`
+4. **Interact** — `ssh <host> tmux send-keys -t <session>` for input
+5. **Observe** — `ssh <host> tmux capture-pane -t <session> -e -p` for snapshot
+6. **Resize** — `ssh <host> tmux set-option -t <session> window-size ...`
+7. **Detach/Kill** — `ssh <host> tmux kill-session -t <session>`
+8. **Attach** — `ssh <host> tmux attach -t <session>` (re-enter existing session)
+
+Source: `src/providers/ssh-tmux-provider.ts`
+
+---
+
+## 4. System SSH Transport
+
+`SystemSshTransport` wraps `child_process.execFile("ssh", args)` with enforced security options. It is used exclusively by the `ssh-tmux` provider.
+
+### Fixed Options
+
+| Option | Value | Purpose |
+|--------|-------|---------|
+| `StrictHostKeyChecking` | `yes` | Reject unknown or changed host keys |
+| `BatchMode` | `yes` | Never prompt for password/passphrase |
+| `ConnectTimeout` | From profile config (default 10s) | Fail fast on unreachable hosts |
+
+### Authentication
+
+- **Key-file**: `-i <keyFile>` passed as separate argv entries before the host
+- **SSH agent**: Implicit — OpenSSH uses `SSH_AUTH_SOCK` when no `-i` is specified
+- **Password**: **Not supported** — `BatchMode=yes` prevents interactive prompts
+
+### Remote Argument Escaping
+
+All remote arguments undergo POSIX single-quote escaping before being passed to `ssh`:
+
+```typescript
+// src/providers/system-ssh-transport.ts → quoteRemoteArg()
+function quoteRemoteArg(value: string): string {
+  if (value.length === 0) return "''"
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+```
+
+This prevents shell injection through remote arguments. Arguments are passed as an array to `execFile`, not concatenated into a shell command string.
+
+### Proxy Jump Support
+
+If the SSH profile has `SSH_PROXY_JUMP` set (via OpenSSH config merge or explicit `env` field), the `ssh-tmux` provider passes it to the system `ssh` command via `-o ProxyJump=<value>`.
+
+Source: `src/providers/system-ssh-transport.ts`
+
+---
+
+## 5. Configuration
+
+### SSH Profiles
+
+SSH targets are defined in profile configuration files. There are three configuration sources (by priority):
+
+1. **Legacy `hosts.json`** — Single file with all profiles (triggered by `TERMINAL_USE_HOSTS_CONFIG` env var)
+2. **Overlay `profiles/<name>.json`** — One file per host under XDG config dir (`~/.config/terminal-use-mcp/profiles/`)
+3. **OpenSSH `~/.ssh/config`** — Referenced via `sshConfigHost` field in profiles; connection parameters merged
+
+### Profile Schema
+
+```typescript
+// src/targets/target-types.ts
+type SshHostProfile = {
+  name: string
+  sshConfigHost?: string       // Reference to OpenSSH config Host alias
+  host: string
+  port: number
+  username: string
+  auth: SshAuthRef
+  knownHosts?: string          // Path to known_hosts file
+  pinnedHostFingerprint?: string  // SHA256/MD5 fingerprint pin
+  defaultCwd?: string
+  remoteAllowedCwd: string[]
+  remoteDeniedCwd?: string[]
+  allowTmux?: boolean
+  env?: Record<string, string>
+  connectTimeoutMs?: number
+  keepaliveIntervalMs?: number
+}
+```
+
+### Example Profile (hosts.json)
+
+```json
+{
+  "my-server": {
+    "name": "my-server",
+    "host": "192.168.1.100",
+    "port": 22,
+    "username": "deploy",
+    "auth": {
+      "type": "key-file",
+      "path": "~/.ssh/id_deploy"
+    },
+    "knownHosts": "~/.ssh/known_hosts",
+    "defaultCwd": "/home/deploy/app",
+    "remoteAllowedCwd": ["/home/deploy", "/tmp"],
+    "remoteDeniedCwd": ["/home/deploy/.ssh"],
+    "connectTimeoutMs": 8000
+  }
+}
+```
+
+### Example Profile (OpenSSH config integration)
+
+```json
+// ~/.config/terminal-use-mcp/profiles/prod.json
+{
+  "sshConfigHost": "prod-web",
+  "defaultCwd": "/var/www",
+  "remoteAllowedCwd": ["/var/www", "/tmp", "/var/log"],
+  "pinnedHostFingerprint": "SHA256:abc123..."
+}
+```
+
+When `sshConfigHost` is set, the system parses `~/.ssh/config` and merges `HostName`, `Port`, `User`, and `IdentityFile` from the matching `Host` entry.
+
+Source: `src/targets/ssh-host-config.ts`
+
+---
+
+## 6. Security Model
+
+### Host Key Verification
+
+Host key verification is **always strict**. One of two mechanisms must pass:
+
+1. **known_hosts file** — The host's public key must match an entry in `knownHosts` (default: `~/.ssh/known_hosts`). On mismatch (ROTATED_KEY), the connection is rejected with `SshHostKeyMismatchError`. On missing entry, the connection is rejected with `SshHostKeyUnknownError`.
+
+2. **Pinned fingerprint** — If the profile has `pinnedHostFingerprint` set, the actual host key fingerprint is computed and compared against the pinned value (SHA256 or MD5 format). This is the strongest guarantee — it pins the exact key, independent of known_hosts file management.
+
+> There is **no** `StrictHostKeyChecking=no` mode. Unknown hosts are never silently accepted.
+
+Source: `src/targets/host-fingerprint.ts`, `src/targets/known-hosts.ts`
+
+### Authentication
+
+Only two auth methods are supported:
+
+| Method | How | Security |
+|--------|-----|----------|
+| `ssh-agent` | Agent socket (`SSH_AUTH_SOCK`) | Safest — MCP never touches private keys |
+| `key-file` | Path to private key file | Key read into memory for `ssh2`; never logged or stored |
+
+**Password authentication is permanently disabled.** The system rejects profiles with `auth.type: "password"` at config validation time. `BatchMode=yes` in system SSH transport prevents any interactive password prompt.
+
+### SSH Agent Socket Discovery
+
+When `auth.type` is `"agent"` and no explicit `socket` is configured, the system auto-discovers the agent socket:
+
+1. `SSH_AUTH_SOCK` environment variable (highest priority)
+2. `$XDG_RUNTIME_DIR/ssh-agent.socket` (systemd user service)
+3. `$XDG_RUNTIME_DIR/keyring/ssh` (GNOME Keyring)
+4. Runtime scan via `ss -xU | grep agent` (fallback)
+
+Source: `src/targets/ssh-auth.ts` → `getSshAgentSocket()`
+
+### Remote CWD Policy
+
+Remote working directories are validated **locally** (no SSH connection needed) against per-profile rules:
+
+- **`remoteAllowedCwd`** (required): List of allowed directory roots. CWD must be inside at least one.
+- **`remoteDeniedCwd`** (optional): List of denied roots. Takes precedence over allowed.
+- **`defaultCwd`** (optional): Used when caller doesn't specify a CWD.
+
+If a profile has no `remoteAllowedCwd` entries, all remote CWD requests are denied.
+
+Source: `src/targets/remote-cwd-policy.ts`
+
+### Credential Handling
+
+- Key file paths are stored in config, but **private key content is never logged, stored in metadata, or written to artifacts**
+- ssh-agent socket paths are referenced but MCP never sends data to the socket beyond what `ssh2` requires for authentication
+- Passphrase support: only via environment variable reference (`passphraseEnv` field), never as plaintext in config
+- Config files containing forbidden keys (`password`, `privateKey`, `privateKeyContent`, `token`) are rejected at load time
+
+### Command Safety
+
+The same deny/allow/risky command model applies to remote sessions:
+
+- Built-in deny list: `sudo`, `rm`, `ssh`, `curl`, etc.
+- `TERMINAL_USE_ALLOW_COMMANDS` overrides the deny list (allow takes priority)
+- `TERMINAL_USE_DENY_COMMANDS` extends it
+- `TERMINAL_USE_RISKY_COMMAND_MODE`: `deny` (default), `ask`, or `allow`
+
+Source: `src/terminal/command-safety.ts`
+
+---
+
+## 7. Host Fingerprint Pinning
+
+Profiles can pin a host's expected fingerprint via `pinnedHostFingerprint`:
+
+```
+SHA256:uNiVztksCsDhcc0u9e8BgrgrXK+J2wm0wdFz5q9ZYQo
+MD5:1a:2b:3c:4d:5e:6f:7g:8h:9i:0j:1k:2l:3m:4n:5o:6p
+```
+
+When set:
+
+1. The actual host key fingerprint is computed during the SSH handshake
+2. It is compared against the pinned value (normalizing format differences)
+3. On mismatch or format error, the connection is rejected
+
+This provides protection beyond known_hosts — a compromised known_hosts file cannot bypass the pin.
+
+Source: `src/targets/host-fingerprint.ts` → `verifyPinnedFingerprint()`
+
+---
+
+## 8. Tool Integration
+
+The MCP server exposes SSH-related tools for target discovery and management:
+
+### Target Discovery
+
+| Tool | Description |
+|------|-------------|
+| `terminal.targets` | Lists available targets: `{ kind: "local" }` plus all SSH profiles from `hosts.json` |
+| `terminal.target_info` | Returns redacted profile details (auth type shown, key paths and socket paths redacted) |
+| `terminal.verify_target` | Pre-flight validation: checks profile exists, auth is resolvable, known_hosts accessible. **Does NOT** open an SSH connection |
+
+### Remote Tmux Management
+
+| Tool | Description |
+|------|-------------|
+| `terminal.tmux_list` | List tmux sessions on a remote host via `ssh <host> tmux list-sessions` |
+| `terminal.tmux_kill` | Kill a tmux session on a remote host via `ssh <host> tmux kill-session` |
+
+Both `tmux_list` and `tmux_kill` accept an optional `profile` / `target` parameter. When a remote target is specified, the command is forwarded through SSH.
+
+---
+
+## 9. Inline SSH Targets (Disabled by Default)
+
+By default, SSH targets must be pre-configured in `hosts.json`. The environment variable `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1` enables inline host specification in tool calls ( `{ kind: "ssh", host, port, username, auth }` without a profile name).
+
+This is disabled by default because inline targets bypass profile-based CWD policies and may encourage insecure patterns. When enabled, inline targets still enforce strict host key checking and key/agent-only auth.
+
+---
+
+## 10. Limitations
+
+### ssh-pty
+
+| Limitation | Detail |
+|------------|--------|
+| **No disconnect recovery** | When the SSH connection drops, the remote PTY process and all session state are lost. There is no reconnection mechanism. |
+| **Scrollback is limited** | Only the current xterm-headless buffer is available for find/scrollback. Complete remote history is not accessible. |
+| **No attach** | Each `start()` creates a new SSH exec channel. There is no way to re-attach to a disconnected session. |
+| **No rename** | Session ID is assigned at creation and cannot be changed. |
+
+### ssh-tmux
+
+| Limitation | Detail |
+|------------|--------|
+| **Per-command SSH overhead** | Every tmux operation (send-keys, capture-pane, etc.) opens a new SSH connection. This adds latency compared to the persistent channel in ssh-pty. |
+| **tmux 3.2+ required on remote** | Features like `capture-pane -e` (ANSI escape preservation) require tmux 3.2 or newer. Older versions may work with degraded highlight support. |
+| **Snapshot-based parsing** | Highlights are parsed from periodic `capture-pane -e` snapshots, not from a real-time data stream. Rapidly changing screens may produce stale snapshots. |
+
+### Cross-provider
+
+| Limitation | Detail |
+|------------|--------|
+| **CWD validation is local** | Remote CWD policy checks run locally. The server does not verify that the directory actually exists on the remote host. |
+| **No Windows SSH host support for ssh-tmux** | ssh-tmux requires tmux on the remote host, which is Unix-only. ssh-pty works with Windows SSH hosts (ConPTY). |
+| **System SSH transport dependency** | ssh-tmux requires the `ssh` binary on the local PATH. If missing, only ssh-pty is available for remote sessions. |
+
+---
+
+## 11. Error Handling
+
+SSH-specific errors are mapped to typed error codes:
+
+| Error Code | Trigger |
+|------------|---------|
+| `SSH_HOST_KEY_MISMATCH` | Host key in known_hosts doesn't match actual key (rotation or MITM) |
+| `SSH_HOST_KEY_UNKNOWN` | Host not found in known_hosts and no pinned fingerprint |
+| `SSH_AUTH_FAILED` | Authentication failed (wrong key, agent unavailable, etc.) |
+| `SSH_CONNECT_TIMEOUT` | Connection timeout (unreachable host, firewall) |
+| `SSH_CONNECTION_LOST` | Connection dropped after establishment (ssh-pty only) |
+| `REMOTE_CWD_DENIED` | Requested CWD not in profile's `remoteAllowedCwd` |
+| `REMOTE_TMUX_NOT_AVAILABLE` | `tmux` not found on remote host |
+| `REMOTE_COMMAND_DENIED` | Startup command blocked by deny list |
+
+Source: `src/terminal/errors.ts`
+
+---
+
+## 12. Source File Index
+
+| File | Responsibility |
+|------|---------------|
+| `src/providers/ssh-pty-provider.ts` | ssh-pty provider: ssh2 connection, PTY channel, xterm-adapter integration |
+| `src/providers/ssh-tmux-provider.ts` | ssh-tmux provider: system SSH + remote tmux lifecycle |
+| `src/providers/system-ssh-transport.ts` | `execFile("ssh", ...)` wrapper with security options and error mapping |
+| `src/providers/provider-registry.ts` | Provider registration and whitelist filtering |
+| `src/providers/provider.ts` | `ProviderName`, `ProviderCapabilities`, `TerminalProvider` interface |
+| `src/targets/ssh-host-config.ts` | Profile loading: hosts.json, overlay files, OpenSSH config merge |
+| `src/targets/ssh-auth.ts` | Auth resolution: agent socket discovery, key-file validation |
+| `src/targets/ssh-profile-loader.ts` | Target resolution: profile lookup by name, inline target handling |
+| `src/targets/ssh-config-parser.ts` | OpenSSH `~/.ssh/config` parser |
+| `src/targets/target-types.ts` | `SshHostProfile`, `SshAuthRef`, `TerminalTarget`, `SshSessionMetadata` types |
+| `src/targets/host-fingerprint.ts` | Fingerprint computation, parsing, and pinned-fingerprint verification |
+| `src/targets/known-hosts.ts` | known_hosts file parser and host key lookup |
+| `src/targets/remote-cwd-policy.ts` | Remote CWD allow/deny policy enforcement |
+| `src/targets/config-schema.ts` | Zod schemas for profile validation (forbidden key rejection) |
+| `src/targets/ssh-host-config-helpers.ts` | Tilde expansion, path utilities |
+| `src/targets/xdg-paths.ts` | XDG config/data directory resolution |

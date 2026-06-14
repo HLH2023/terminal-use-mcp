@@ -9,11 +9,19 @@ import {
   SshTmuxProvider,
   type SshTmuxCommandExecutor,
 } from "../../src/providers/ssh-tmux-provider.js"
-import { buildSshCommandArgs, quoteRemoteArg, type SystemSshCommandResult } from "../../src/providers/system-ssh-transport.js"
+import { buildSshCommandArgs, buildSshRawCommandArgs, quoteRemoteArg, type SystemSshCommandResult } from "../../src/providers/system-ssh-transport.js"
+import { RemoteCapabilityCache, type RemoteCapabilities } from "../../src/targets/remote-capability-cache.js"
 import { RemoteCommandDeniedError, RemoteCwdDeniedError, SessionNotFoundError } from "../../src/terminal/errors.js"
 import type { SshHostProfile } from "../../src/targets/target-types.js"
 
 const logger = createLogger("error")
+const DEFAULT_REMOTE_CAPS: RemoteCapabilities = {
+  os: "Linux",
+  shell: "/bin/bash",
+  tmuxPath: "/usr/bin/tmux",
+  tmuxVersion: "tmux 3.4a",
+  home: "/home/tester",
+}
 
 function createProfile(overrides: Partial<SshHostProfile> = {}): SshHostProfile {
   return {
@@ -47,7 +55,10 @@ function ok(stdout = ""): SystemSshCommandResult {
   return { stdout, stderr: "", exitCode: 0 }
 }
 
-function createProviderWithExecutor(handler?: (args: readonly string[]) => SystemSshCommandResult): {
+function createProviderWithExecutor(
+  handler?: (args: readonly string[]) => SystemSshCommandResult,
+  capabilities: RemoteCapabilities = DEFAULT_REMOTE_CAPS,
+): {
   provider: SshTmuxProvider
   calls: string[][]
 } {
@@ -60,6 +71,7 @@ function createProviderWithExecutor(handler?: (args: readonly string[]) => Syste
     hostsConfig: new Map([["devbox", createProfile()]]),
     commandExecutor: executor,
     sshAvailabilityChecker: async () => true,
+    capabilityCache: new RemoteCapabilityCache([["devbox", capabilities]]),
   })
   return { provider, calls }
 }
@@ -84,6 +96,17 @@ describe("system ssh transport", () => {
     expect(args).toContain("--")
     expect(args).toContain("tmux")
     expect(args).toContain("'hello world'")
+  })
+
+  it("构造 raw SSH command argv 时不对内部 probe 命令做 token 拆分", () => {
+    const args = buildSshRawCommandArgs(
+      { host: "example.test", port: 2222, username: "tester" },
+      "printf 'OS=%s\\n' \"$(uname -s)\"",
+      { connectTimeoutMs: 10_000 },
+    )
+
+    expect(args).toContain("BatchMode=yes")
+    expect(args.at(-1)).toBe("printf 'OS=%s\\n' \"$(uname -s)\"")
   })
 
   it("key-file 模式把 -i path 放在 host 参数之前", () => {
@@ -149,7 +172,7 @@ describe("SshTmuxProvider", () => {
     expect(session.providerSessionId).toMatch(/^rtumcp_[0-9a-f]{8}$/)
     expect(startCall).toBeDefined()
     expect(startCall).toEqual([
-      "tmux",
+      "/usr/bin/tmux",
       "new-session",
       "-d",
       "-s",
@@ -161,7 +184,7 @@ describe("SshTmuxProvider", () => {
       "-c",
       "/home/tester/project",
       "--",
-      expect.stringMatching(/^exec \$SHELL -l -ic /u),
+      expect.stringMatching(/^exec '\/bin\/bash' -l -ic /u),
     ])
     expect(startCall?.at(-1)).toContain("node")
     expect(startCall?.at(-1)).toContain("app.js")
@@ -187,7 +210,19 @@ describe("SshTmuxProvider", () => {
     const session = await provider.start(createStartInput())
     await provider.press(session.providerSessionId, "ctrl+c", { modifiers: ["ctrl"], key: "c" })
 
-    expect(calls.at(-1)).toEqual(["tmux", "send-keys", "-t", session.providerSessionId, "C-c"])
+    expect(calls.at(-1)).toEqual(["/usr/bin/tmux", "send-keys", "-t", session.providerSessionId, "C-c"])
+  })
+
+  it("remote tmux 缺失时 start 失败关闭", async () => {
+    const { provider } = createProviderWithExecutor(undefined, { ...DEFAULT_REMOTE_CAPS, tmuxPath: null, tmuxVersion: null })
+
+    await expect(provider.start(createStartInput())).rejects.toThrow(/tmux is not installed/u)
+  })
+
+  it("remote tmux 低于 3.2 时 start 失败关闭", async () => {
+    const { provider } = createProviderWithExecutor(undefined, { ...DEFAULT_REMOTE_CAPS, tmuxVersion: "tmux 3.1c" })
+
+    await expect(provider.start(createStartInput())).rejects.toThrow(/too old/u)
   })
 
   it("parse tmux list-sessions 输出为结构化列表", () => {

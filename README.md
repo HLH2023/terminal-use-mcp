@@ -505,7 +505,7 @@ terminal-use-mcp is not a sandbox. Security policies restrict the entry point, n
 - **Provider whitelist**: `TERMINAL_USE_PROVIDERS` controls which providers are enabled (unset = all)
 - **observationTrust**: All snapshots return `observationTrust: "untrusted"` — terminal output is untrusted observation, not instruction
 
-See [docs/security.md](docs/security.md) for full policy details, env var overrides, and regex patterns.
+See [docs/security.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/security.md) for full policy details, env var overrides, and regex patterns.
 
 ## Remote SSH
 
@@ -519,21 +519,21 @@ Remote SSH features let you control TUI programs on remote hosts. Two SSH provid
 
 SSH targets are defined in `~/.config/terminal-use-mcp/hosts.json`. No password login; ssh-agent or key-file auth only.
 
-See [docs/REMOTE_TERMINAL_GUIDE.md](docs/REMOTE_TERMINAL_GUIDE.md) for full design.
+See [docs/REMOTE_TERMINAL_GUIDE.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/REMOTE_TERMINAL_GUIDE.md) for full design.
 
 ## Further Reading
 
 | Topic | Document |
 |-------|----------|
-| Security policies, env vars, deny lists | [docs/security.md](docs/security.md) |
-| Scrollback strategy, buffer modes | [docs/scrollback.md](docs/scrollback.md) |
-| Type definitions, error codes | [docs/types-and-errors.md](docs/types-and-errors.md) |
-| Remote SSH design | [docs/REMOTE_TERMINAL_GUIDE.md](docs/REMOTE_TERMINAL_GUIDE.md) |
-| Remote SSH architecture | [docs/REMOTE_SSH_ARCHITECTURE.md](docs/REMOTE_SSH_ARCHITECTURE.md) |
-| Controlling Claude Code TUI | [docs/TUI_CLAUDE_CODE.md](docs/TUI_CLAUDE_CODE.md) |
-| Controlling Codex CLI TUI | [docs/TUI_CODEX_CLI.md](docs/TUI_CODEX_CLI.md) |
-| Controlling OpenCode TUI | [docs/TUI_OPENCODE_NATIVE.md](docs/TUI_OPENCODE_NATIVE.md) |
-| Controlling OpenCode + OmO | [docs/TUI_OPENCODE_OMO.md](docs/TUI_OPENCODE_OMO.md) |
+| Security policies, env vars, deny lists | [docs/security.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/security.md) |
+| Scrollback strategy, buffer modes | [docs/scrollback.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/scrollback.md) |
+| Type definitions, error codes | [docs/types-and-errors.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/types-and-errors.md) |
+| Remote SSH design | [docs/REMOTE_TERMINAL_GUIDE.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/REMOTE_TERMINAL_GUIDE.md) |
+| Remote SSH architecture | [docs/REMOTE_SSH_ARCHITECTURE.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/REMOTE_SSH_ARCHITECTURE.md) |
+| Controlling Claude Code TUI | [docs/TUI_CLAUDE_CODE.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/TUI_CLAUDE_CODE.md) |
+| Controlling Codex CLI TUI | [docs/TUI_CODEX_CLI.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/TUI_CODEX_CLI.md) |
+| Controlling OpenCode TUI | [docs/TUI_OPENCODE_NATIVE.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/TUI_OPENCODE_NATIVE.md) |
+| Controlling OpenCode + OmO | [docs/TUI_OPENCODE_OMO.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/TUI_OPENCODE_OMO.md) |
 
 ## Development
 

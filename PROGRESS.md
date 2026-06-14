@@ -2,8 +2,53 @@
 
 > 最后更新: 2026-06-14
 > Local Terminal status: PHASE 0-15 ALL COMPLETE — 生产就绪 ✅
-> Remote SSH status: Remote-0 至 Remote-5 全部完成 ✅
+> Remote SSH status: Remote-0 至 Remote-5 全部完成；Remote Capability Discovery 完成 ✅
 > E2E 状态: 项目级 OpenCode MCP 配置已就绪，SSH localhost 自测环境待 setup-e2e-ssh.sh 初始化 ✅
+
+---
+
+## Remote Capability Discovery 实现记录（2026-06-14） ✅
+
+### 本会话新增/修改文件
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `src/targets/remote-capability-cache.ts` | ✅ 新增 | 新增远端 OS/shell/tmux path/tmux version/home 探测解析与 profile 级缓存；支持 ssh2 Client 与 system-ssh transport 两条探测路径 |
+| `src/providers/system-ssh-transport.ts` | ✅ 更新 | 新增 raw remote command argv 构造与 `execRemote()`；保留严格 BatchMode、StrictHostKeyChecking、ConnectTimeout 与 key-file 参数 |
+| `src/providers/ssh-pty-provider.ts` | ✅ 更新 | SSH 连接成功后先探测远端能力；Unix 使用探测到的 login shell；Windows 分支避免 `-l -ic` |
+| `src/providers/ssh-tmux-provider.ts` | ✅ 更新 | start/attach 前探测能力；tmux 缺失或低于 3.2 fail-closed；provider 内后续 tmux 命令使用发现到的绝对路径 |
+| `src/targets/index.ts` | ✅ 更新 | 导出远端能力发现类型与缓存入口 |
+| `tests/unit/remote-capability-cache.test.ts` | ✅ 新增 | 覆盖 Linux/Darwin/Windows/空输出解析、profile 缓存与探测失败 fallback |
+| `tests/unit/ssh-pty-provider.test.ts` | ✅ 更新 | 覆盖探测 shell 构造与 Windows 无 Unix login flags 分支 |
+| `tests/unit/ssh-tmux-provider.test.ts` | ✅ 更新 | 覆盖 raw SSH command argv、绝对 tmux path、tmux 缺失与版本过低 fail-closed |
+
+### 验证结果
+
+| 命令/检查 | 结果 |
+|-----------|------|
+| LSP diagnostics: 8 个变更 TS/test 文件 | ✅ 0 diagnostics |
+| `npx tsc --noEmit` | ✅ 零错误 |
+| `npm test` | ✅ 30 files passed / 589 tests passed |
+
+### 完成标准对照
+
+| 标准 | 状态 |
+|------|------|
+| SSH profile 首次连接自动探测远端 OS/shell/tmux path/tmux version/home | ✅ |
+| profile 级能力缓存避免重复探测 | ✅ |
+| `ssh-pty` 不再硬编码 `$SHELL -l -ic`，改用探测 shell 并支持 Windows 分支 | ✅ |
+| `ssh-tmux` 不再硬编码 bare `tmux`，provider 内全部使用发现到的 tmux 绝对路径 | ✅ |
+| 远端 tmux 缺失或版本低于 3.2 时 fail-closed | ✅ |
+| 新增 parser/cache 单元测试并保持全量测试通过 | ✅ |
+| 不使用 `any` / `@ts-ignore` / `@ts-expect-error` | ✅ |
+| 不修改 HomeLab 主业务 (`apps/*` / `packages/*`) | ✅ |
+
+### 技术笔记
+
+- `RemoteCapabilityCache` 以 profile name 为 key，并合并 pending probe，避免并发首连对同一 profile 重复发起探测。
+- system ssh 的 raw probe 只用于内部固定探测命令；常规远端 argv 仍走逐 token POSIX quote，避免扩大 shell 字符串拼接面。
+- `ssh-tmux` public helper `execSshTmux()` 仍保持“调用方传入完整远端 argv”的兼容接口；provider 内部现在传入 `caps.tmuxPath`，不再假设远端 PATH 有 `tmux`。
+- 本次仅修改 `tools/local/terminal-use-mcp/`，未触碰 HomeLab 主业务、冻结规划或主任务板。
 
 ---
 

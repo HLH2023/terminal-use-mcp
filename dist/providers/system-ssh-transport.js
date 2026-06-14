@@ -17,25 +17,11 @@ const SSH_VERSION_TIMEOUT_MS = 2_000;
 const SSH_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 /** 供测试和 Provider 复用的系统 ssh argv 构造函数。 */
 export function buildSshCommandArgs(target, remoteArgs, options = {}) {
-    const connectTimeoutSeconds = toOpenSshTimeoutSeconds(options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
-    const sshArgs = [
-        "-p",
-        String(target.port),
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        `ConnectTimeout=${connectTimeoutSeconds}`,
-        "-o",
-        "BatchMode=yes",
-        `${target.username}@${target.host}`,
-        "--",
-        ...remoteArgs.map(quoteRemoteArg),
-    ];
-    if (options.keyFile !== undefined) {
-        // 与 OpenSSH 惯例一致：-i 放在 host 前，且作为独立 argv 传入。
-        sshArgs.unshift("-i", options.keyFile);
-    }
-    return sshArgs;
+    return [...buildBaseSshArgs(target, options), "--", ...remoteArgs.map(quoteRemoteArg)];
+}
+/** Build argv for a raw remote command string executed by the remote login shell. */
+export function buildSshRawCommandArgs(target, command, options = {}) {
+    return [...buildBaseSshArgs(target, options), "--", command];
 }
 /**
  * POSIX shell argv 转义。
@@ -54,6 +40,47 @@ export function quoteRemoteArg(value) {
 export async function execSshCommand(target, remoteArgs, options = {}) {
     const args = buildSshCommandArgs(target, remoteArgs, options);
     const execTimeoutMs = options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
+    return executeSshFile(target, args, options, execTimeoutMs);
+}
+/** Execute an arbitrary raw command on the remote host via SSH. */
+export async function execRemote(target, command, options = {}) {
+    const args = buildSshRawCommandArgs(target, command, options);
+    const execTimeoutMs = options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
+    return executeSshFile(target, args, options, execTimeoutMs);
+}
+/** 检查系统 ssh 是否在 PATH 中可执行；不读取任何用户 SSH 配置或发起连接。 */
+export async function isSystemSshAvailable() {
+    return new Promise((resolve) => {
+        execFile("ssh", ["-V"], { timeout: SSH_VERSION_TIMEOUT_MS }, (error) => {
+            resolve(error === null);
+        });
+    });
+}
+function toOpenSshTimeoutSeconds(timeoutMs) {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+        return Math.ceil(DEFAULT_CONNECT_TIMEOUT_MS / 1000);
+    return Math.max(1, Math.ceil(timeoutMs / 1000));
+}
+function buildBaseSshArgs(target, options) {
+    const connectTimeoutSeconds = toOpenSshTimeoutSeconds(options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
+    const sshArgs = [
+        "-p",
+        String(target.port),
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        `ConnectTimeout=${connectTimeoutSeconds}`,
+        "-o",
+        "BatchMode=yes",
+        `${target.username}@${target.host}`,
+    ];
+    if (options.keyFile !== undefined) {
+        // 与 OpenSSH 惯例一致：-i 放在 host 前，且作为独立 argv 传入。
+        sshArgs.unshift("-i", options.keyFile);
+    }
+    return sshArgs;
+}
+function executeSshFile(target, args, options, execTimeoutMs) {
     return new Promise((resolve, reject) => {
         execFile("ssh", args, { timeout: execTimeoutMs, maxBuffer: SSH_MAX_BUFFER_BYTES }, (error, stdout, stderr) => {
             const normalizedStdout = stdout ?? "";
@@ -81,24 +108,9 @@ export async function execSshCommand(target, remoteArgs, options = {}) {
                 reject(new SshAuthFailedError(hostLabel, { stderr: normalizedStderr }));
                 return;
             }
-            // 远端命令非零退出（例如 tmux 找不到 session）交给上层 provider 解析，
-            // 这样可以映射到 SESSION_NOT_FOUND / REMOTE_TMUX_NOT_AVAILABLE 等业务错误。
             resolve({ stdout: normalizedStdout, stderr: normalizedStderr, exitCode });
         });
     });
-}
-/** 检查系统 ssh 是否在 PATH 中可执行；不读取任何用户 SSH 配置或发起连接。 */
-export async function isSystemSshAvailable() {
-    return new Promise((resolve) => {
-        execFile("ssh", ["-V"], { timeout: SSH_VERSION_TIMEOUT_MS }, (error) => {
-            resolve(error === null);
-        });
-    });
-}
-function toOpenSshTimeoutSeconds(timeoutMs) {
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
-        return Math.ceil(DEFAULT_CONNECT_TIMEOUT_MS / 1000);
-    return Math.max(1, Math.ceil(timeoutMs / 1000));
 }
 function formatSshTarget(target) {
     return `${target.username}@${target.host}:${target.port}`;

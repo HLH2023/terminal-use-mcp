@@ -12,6 +12,7 @@
  * - key-file 只在连接前以 Buffer 读入本地内存，不写入日志、metadata 或 artifact。
  */
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { Client } from "ssh2";
 import { detectRiskSignals } from "../terminal/confirm-detection.js";
 import { LargePasteRefusedError, ProcessExitedError, ProviderCapabilityUnsupportedError, SecretDetectedError, SessionNotFoundError, SessionTimeoutError, SshAuthFailedError, SshConnectTimeoutError, SshConnectionLostError, SshHostKeyMismatchError, SshHostKeyUnknownError, TerminalUseError, } from "../terminal/errors.js";
@@ -27,6 +28,7 @@ import { safeCleanup } from "../terminal/safe-cleanup.js";
 import { computeHostFingerprint, verifyPinnedFingerprint } from "../targets/host-fingerprint.js";
 import { parseKnownHosts } from "../targets/known-hosts.js";
 import { createRemoteCwdPolicy, resolveRemoteCwd } from "../targets/remote-cwd-policy.js";
+import { remoteCapabilityCache } from "../targets/remote-capability-cache.js";
 import { loadHostsConfig } from "../targets/ssh-host-config.js";
 import { resolveSshAuth } from "../targets/ssh-auth.js";
 import { resolveSshTarget } from "../targets/ssh-profile-loader.js";
@@ -92,10 +94,12 @@ export class SshPtyProvider {
     sessions;
     logger;
     options;
+    capabilityCache;
     constructor(logger, options) {
         this.sessions = new Map();
         this.logger = logger;
         this.options = options ?? {};
+        this.capabilityCache = this.options.capabilityCache ?? remoteCapabilityCache;
     }
     /** ssh2 是 package dependency，安装后即可用；无 native addon 动态失败路径。 */
     async isAvailable() {
@@ -133,6 +137,9 @@ export class SshPtyProvider {
         const client = new Client();
         try {
             await connectSshClient(client, connectConfig, resolvedTarget, () => hostKeyError);
+            const profileName = remoteCapabilityProfileName(resolvedTarget);
+            const caps = await this.capabilityCache.probe(client, profileName);
+            this.logger.info("Remote capabilities", { profile: profileName, caps });
             const channel = await openRemotePtyExecChannel(client, {
                 command: input.command,
                 args: input.args,
@@ -140,6 +147,7 @@ export class SshPtyProvider {
                 cols: input.cols,
                 rows: input.rows,
                 env: { ...(resolvedTarget.env ?? {}), ...(input.env ?? {}) },
+                capabilities: caps,
             });
             const metadata = createSshSessionMetadata(resolvedTarget, auth.authType, cwd, input, verifiedFingerprint, createdAt);
             const session = {
@@ -683,11 +691,15 @@ export function buildShellExecCommand(command, args) {
 }
 /**
  * ssh2 exec request 只能发送 command string；这里用严格转义构造：
- * exec $SHELL -l -ic 'cd <cwd> && exec <command> <args...>'
+ * Unix: exec <remote-shell> -l -ic 'cd <cwd> && exec <command> <args...>'
+ * Windows: <remote-shell> /c "cd <cwd> && <command> <args...>"
  */
-export function buildRemoteExecCommand(command, args, cwd) {
+export function buildRemoteExecCommand(command, args, cwd, capabilities = { os: "Unknown", shell: "/bin/sh" }) {
+    if (isWindowsRemoteOs(capabilities.os)) {
+        return buildWindowsRemoteExecCommand(command, args, cwd, capabilities.shell);
+    }
     const innerCommand = `cd ${shellQuote(cwd)} && ${buildShellExecCommand(command, args)}`;
-    return `exec $SHELL -l -ic ${shellQuote(innerCommand)}`;
+    return `exec ${shellQuote(capabilities.shell)} -l -ic ${shellQuote(innerCommand)}`;
 }
 function connectSshClient(client, config, target, getHostKeyError) {
     return new Promise((resolve, reject) => {
@@ -730,7 +742,7 @@ function openRemotePtyExecChannel(client, options) {
             width: DEFAULT_PIXEL_WIDTH,
             height: DEFAULT_PIXEL_HEIGHT,
         };
-        const command = buildRemoteExecCommand(options.command, options.args, options.cwd);
+        const command = buildRemoteExecCommand(options.command, options.args, options.cwd, options.capabilities);
         client.exec(command, { pty, env: options.env }, (error, channel) => {
             if (error !== undefined) {
                 reject(error);
@@ -798,6 +810,33 @@ function mapSshClientError(target, error, timeoutMs) {
 }
 function formatTargetHost(target) {
     return `${target.username}@${target.host}:${target.port}`;
+}
+function remoteCapabilityProfileName(target) {
+    return target.profile ?? target.name;
+}
+function isWindowsRemoteOs(os) {
+    return /^(Windows|Windows_NT)/iu.test(os) || /(?:MINGW|MSYS|CYGWIN)/iu.test(os);
+}
+function buildWindowsRemoteExecCommand(command, args, cwd, shell) {
+    if (isPowerShell(shell)) {
+        const commandLine = `Set-Location -LiteralPath ${powerShellSingleQuote(cwd)}; & ${[command, ...args].map(powerShellSingleQuote).join(" ")}`;
+        return `${shell} -NoProfile -Command ${windowsCmdQuote(commandLine)}`;
+    }
+    const commandLine = `cd ${windowsCmdQuote(cwd)} && ${[command, ...args].map(windowsCmdQuote).join(" ")}`;
+    return `${shell} /c ${windowsCmdQuote(commandLine)}`;
+}
+function isPowerShell(shell) {
+    const winBase = path.win32.basename(shell).toLowerCase();
+    const posixBase = path.posix.basename(shell).toLowerCase();
+    return [winBase, posixBase].some((base) => base === "powershell.exe" || base === "pwsh.exe");
+}
+function windowsCmdQuote(value) {
+    if (/^[A-Za-z0-9_@%+=:,./\\-]+$/u.test(value))
+        return value;
+    return `"${value.replace(/["^&|<>%]/gu, (char) => `^${char}`)}"`;
+}
+function powerShellSingleQuote(value) {
+    return `'${value.replace(/'/gu, "''")}'`;
 }
 function normalizeChannelData(chunk) {
     return typeof chunk === "string" ? chunk : chunk.toString("utf8");

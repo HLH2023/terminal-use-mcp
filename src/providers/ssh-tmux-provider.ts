@@ -19,7 +19,7 @@ import type { Highlight, TerminalSnapshot, TerminalSnapshotMode } from "../termi
 import type { Logger } from "../logger.js"
 import type { SshHostProfile } from "../targets/target-types.js"
 import type { ResolvedSshTarget } from "../targets/ssh-profile-loader.js"
-import type { SystemSshCommandResult } from "./system-ssh-transport.js"
+import type { SystemSshCommandResult, SystemSshTransport } from "./system-ssh-transport.js"
 import { XtermAdapter } from "../terminal/xterm-adapter.js"
 import { safeCleanup } from "../terminal/safe-cleanup.js"
 import { parsedKeyToTmuxKey } from "../terminal/keymap.js"
@@ -36,6 +36,7 @@ import type { ScreenState } from "../terminal/wait.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
 import { generateSessionId } from "../terminal/ids.js"
 import { createRemoteCwdPolicy, assertRemoteCwdAllowed } from "../targets/remote-cwd-policy.js"
+import { remoteCapabilityCache, type RemoteCapabilities, type RemoteCapabilityCache } from "../targets/remote-capability-cache.js"
 import { expandUserPath, loadHostsConfig } from "../targets/ssh-host-config.js"
 import { resolveSshTarget } from "../targets/ssh-profile-loader.js"
 import {
@@ -47,7 +48,7 @@ import {
   SessionTimeoutError,
   TerminalUseError,
 } from "../terminal/errors.js"
-import { execSshCommand, isSystemSshAvailable } from "./system-ssh-transport.js"
+import { execRemote, execSshCommand, isSystemSshAvailable } from "./system-ssh-transport.js"
 
 const SSH_TMUX_EXEC_TIMEOUT_MS = 10_000
 const DEFAULT_TTL_MS = 60 * 60 * 1000
@@ -94,6 +95,7 @@ export type SshTmuxProviderOptions = {
   hostsConfigPath?: string
   commandExecutor?: SshTmuxCommandExecutor
   sshAvailabilityChecker?: () => Promise<boolean>
+  capabilityCache?: RemoteCapabilityCache
 }
 
 type SshTmuxSession = {
@@ -101,6 +103,7 @@ type SshTmuxSession = {
   target: ResolvedSshTarget
   targetKey: string
   tmuxId: string
+  tmuxPath: string
   rows: number
   cols: number
   xtermAdapter: XtermAdapter
@@ -168,6 +171,7 @@ export class SshTmuxProvider implements TerminalProvider {
   private readonly hostsConfigPath?: string
   private readonly commandExecutor: SshTmuxCommandExecutor
   private readonly sshAvailabilityChecker: () => Promise<boolean>
+  private readonly capabilityCache: RemoteCapabilityCache
   private sshAvailable: boolean | undefined
 
   constructor(logger: Logger, options: SshTmuxProviderOptions = {}) {
@@ -177,6 +181,7 @@ export class SshTmuxProvider implements TerminalProvider {
     this.hostsConfigPath = options.hostsConfigPath
     this.commandExecutor = options.commandExecutor ?? execSshTmux
     this.sshAvailabilityChecker = options.sshAvailabilityChecker ?? isSystemSshAvailable
+    this.capabilityCache = options.capabilityCache ?? remoteCapabilityCache
     this.sshAvailable = undefined
   }
 
@@ -190,6 +195,8 @@ export class SshTmuxProvider implements TerminalProvider {
     await this.ensureSystemSshAvailable()
 
     const target = await this.resolveSshTmuxTarget(input)
+    const caps = await this.discoverCapabilities(target)
+    const tmuxPath = ensureRemoteTmuxUsable(this.name, target, caps)
     const remoteCwd = assertRemoteCwdAllowed(createRemoteCwdPolicy(target), input.cwd)
     const sessionId = generateSessionId()
     const tmuxId = createSshTmuxSessionName()
@@ -197,12 +204,12 @@ export class SshTmuxProvider implements TerminalProvider {
     const ttlMs = input.ttlMs ?? DEFAULT_TTL_MS
     const mergedEnv = mergeRemoteEnv(target.env, input.env)
     const xtermAdapter = new XtermAdapter(input.cols, input.rows)
-    const loginInteractiveCommand = buildLoginInteractiveShellCommand(input.command, input.args)
+    const loginInteractiveCommand = buildLoginInteractiveShellCommand(input.command, input.args, caps)
 
     let started = false
     try {
-      await this.applyEnvironment(target, mergedEnv)
-      await this.execRemoteTmux(target, [
+      await this.applyEnvironment(target, tmuxPath, mergedEnv)
+      await this.execRemoteTmux(target, tmuxPath, [
         "new-session",
         "-d",
         "-s",
@@ -218,10 +225,10 @@ export class SshTmuxProvider implements TerminalProvider {
       ], "start", sessionId)
       // 远程 tmux 默认可能未开启 mouse mode（与本地不同，无法假设用户配置），
       // 必须 session 级开启以确保 mouse_scroll/mouse_click 序列正确转发。
-      await this.execRemoteTmux(target, ["set-option", "-t", tmuxId, "mouse", "on"], "set-mouse-on", sessionId)
+      await this.execRemoteTmux(target, tmuxPath, ["set-option", "-t", tmuxId, "mouse", "on"], "set-mouse-on", sessionId)
       started = true
     } finally {
-      await this.clearEnvironment(target, mergedEnv)
+      await this.clearEnvironment(target, tmuxPath, mergedEnv)
       if (!started) {
         // 远程 start 任一步骤失败时 session 尚未登记；本地 adapter 必须同步释放。
         xtermAdapter.dispose()
@@ -250,6 +257,7 @@ export class SshTmuxProvider implements TerminalProvider {
       target,
       targetKey: targetKey(target),
       tmuxId,
+      tmuxPath,
       rows: input.rows,
       cols: input.cols,
       xtermAdapter,
@@ -262,6 +270,7 @@ export class SshTmuxProvider implements TerminalProvider {
       sessionId,
       tmuxId,
       profile: target.profile ?? target.name,
+      tmuxPath,
     })
     return session
   }
@@ -273,10 +282,12 @@ export class SshTmuxProvider implements TerminalProvider {
     if (existing !== undefined) return existing.session
 
     const attachTarget = await this.resolveAttachTarget(sessionIdOrName)
+    const caps = await this.discoverCapabilities(attachTarget.target)
+    const tmuxPath = ensureRemoteTmuxUsable(this.name, attachTarget.target, caps)
     // 远程 attach 的 session 可能在非 mouse mode 下创建，确保开启。
-    await this.execRemoteTmux(attachTarget.target, ["set-option", "-t", attachTarget.tmuxId, "mouse", "on"], "set-mouse-on", sessionIdOrName)
-    const dimensions = await this.readDimensionsForTarget(attachTarget.target, attachTarget.tmuxId, sessionIdOrName)
-    const title = await this.readTitleForTarget(attachTarget.target, attachTarget.tmuxId, sessionIdOrName)
+    await this.execRemoteTmux(attachTarget.target, tmuxPath, ["set-option", "-t", attachTarget.tmuxId, "mouse", "on"], "set-mouse-on", sessionIdOrName)
+    const dimensions = await this.readDimensionsForTarget(attachTarget.target, tmuxPath, attachTarget.tmuxId, sessionIdOrName)
+    const title = await this.readTitleForTarget(attachTarget.target, tmuxPath, attachTarget.tmuxId, sessionIdOrName)
     const sessionId = generateSessionId()
     const now = new Date().toISOString()
     const cwd = attachTarget.target.defaultCwd ?? "/"
@@ -304,6 +315,7 @@ export class SshTmuxProvider implements TerminalProvider {
       target: attachTarget.target,
       targetKey: targetKey(attachTarget.target),
       tmuxId: attachTarget.tmuxId,
+      tmuxPath,
       rows: dimensions.rows,
       cols: dimensions.cols,
       xtermAdapter,
@@ -316,6 +328,7 @@ export class SshTmuxProvider implements TerminalProvider {
       sessionId,
       tmuxId: attachTarget.tmuxId,
       profile: attachTarget.target.profile ?? attachTarget.target.name,
+      tmuxPath,
     })
     return session
   }
@@ -335,7 +348,7 @@ export class SshTmuxProvider implements TerminalProvider {
     if (screenMode === "full") {
       captureArgs.push("-S", "-5000")
     }
-    const captureResult = await this.execRemoteTmux(tracked.target, captureArgs, "snapshot", sessionId)
+    const captureResult = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, captureArgs, "snapshot", sessionId)
     const captureOutput = captureResult.stdout
     // capture-pane 每次返回完整快照；重建 adapter 可避免重复写入导致 full buffer 累积旧快照。
     tracked.xtermAdapter.dispose()
@@ -440,7 +453,7 @@ export class SshTmuxProvider implements TerminalProvider {
 
   async type(sessionId: string, text: string): Promise<void> {
     const tracked = this.getLiveSession(sessionId)
-    await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "-l", text], "type", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", text], "type", sessionId)
     tracked.transcript.recordInput(text)
     this.touch(tracked)
   }
@@ -448,7 +461,7 @@ export class SshTmuxProvider implements TerminalProvider {
   async press(sessionId: string, keyExpr: string, parsed: ParsedKeyExpr): Promise<void> {
     const tracked = this.getLiveSession(sessionId)
     const tmuxKey = parsedKeyToTmuxKey(parsed)
-    await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, tmuxKey], "press", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, tmuxKey], "press", sessionId)
     tracked.transcript.recordInput(`[key:${keyExpr}]`)
     this.touch(tracked)
   }
@@ -458,7 +471,7 @@ export class SshTmuxProvider implements TerminalProvider {
     const effectiveMode = mode ?? "line-by-line"
 
     if (effectiveMode === "raw") {
-      await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "-l", text], "paste", sessionId)
+      await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", text], "paste", sessionId)
       tracked.transcript.recordInput(text)
       this.touch(tracked)
       return
@@ -468,10 +481,10 @@ export class SshTmuxProvider implements TerminalProvider {
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       if (line.length > 0) {
-        await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "-l", line], "paste", sessionId)
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", line], "paste", sessionId)
       }
       if (index < lines.length - 1) {
-        await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "Enter"], "paste-enter", sessionId)
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "Enter"], "paste-enter", sessionId)
         await this.delay(LINE_PASTE_DELAY_MS)
       }
     }
@@ -513,7 +526,7 @@ export class SshTmuxProvider implements TerminalProvider {
   async scroll(sessionId: string, direction: ScrollDirection, lines: number): Promise<void> {
     const tracked = this.getLiveSession(sessionId)
     const key = direction === "up" ? "Up" : "Down"
-    await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "-N", Math.max(1, lines).toString(), key], "scroll", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-N", Math.max(1, lines).toString(), key], "scroll", sessionId)
     this.touch(tracked)
   }
 
@@ -531,7 +544,7 @@ export class SshTmuxProvider implements TerminalProvider {
     }
     const sequence = mouseClickToTmuxSequence(event)
     // send-keys -l 逐字面发送原始序列; tmux 会把序列转发到 pane 内 TUI
-    await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-click", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-click", sessionId)
     tracked.transcript.recordInput(`<mouse:click:${input.button}@${input.col},${input.row}>`)
     this.touch(tracked)
   }
@@ -549,14 +562,14 @@ export class SshTmuxProvider implements TerminalProvider {
       ctrl: input.ctrl,
     }
     const sequence = mouseScrollToTmuxSequence(event)
-    await this.execRemoteTmux(tracked.target, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-scroll", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-scroll", sessionId)
     tracked.transcript.recordInput(`<mouse:scroll:${input.direction}@${input.col},${input.row}>`)
     this.touch(tracked)
   }
 
   async resize(sessionId: string, cols: number, rows: number): Promise<void> {
     const tracked = this.getLiveSession(sessionId)
-    await this.execRemoteTmux(tracked.target, ["resize-window", "-t", tracked.tmuxId, "-x", cols.toString(), "-y", rows.toString()], "resize", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["resize-window", "-t", tracked.tmuxId, "-x", cols.toString(), "-y", rows.toString()], "resize", sessionId)
     tracked.xtermAdapter.resize(cols, rows)
     tracked.cols = cols
     tracked.rows = rows
@@ -567,7 +580,7 @@ export class SshTmuxProvider implements TerminalProvider {
   async rename(sessionId: string, label: string): Promise<void> {
     const tracked = this.getLiveSession(sessionId)
     const safeLabel = sanitizeTmuxSessionName(label)
-    await this.execRemoteTmux(tracked.target, ["rename-session", "-t", tracked.tmuxId, safeLabel], "rename", sessionId)
+    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["rename-session", "-t", tracked.tmuxId, safeLabel], "rename", sessionId)
     // Map key 也需要随 tmuxId 更新
     this.sessions.delete(tracked.tmuxId)
     tracked.tmuxId = safeLabel
@@ -584,7 +597,7 @@ export class SshTmuxProvider implements TerminalProvider {
       {
         name: "remote.kill-session",
         fn: async () => {
-          await this.execRemoteTmux(tracked.target, ["kill-session", "-t", tracked.tmuxId], "kill", sessionId)
+          await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["kill-session", "-t", tracked.tmuxId], "kill", sessionId)
         },
       },
       {
@@ -637,7 +650,7 @@ export class SshTmuxProvider implements TerminalProvider {
 
     for (const entry of targetEntries) {
       try {
-        const remoteEntries = await this.listTmuxSessionsForTarget(entry.target)
+        const remoteEntries = await this.listTmuxSessionsForTarget(entry.target, entry.tmuxPath)
         const trackedTmuxIds = new Set(
           Array.from(this.sessions.values())
             .filter((tracked) => tracked.targetKey === entry.key)
@@ -699,13 +712,21 @@ export class SshTmuxProvider implements TerminalProvider {
     }
   }
 
+  private async discoverCapabilities(target: ResolvedSshTarget): Promise<RemoteCapabilities> {
+    const profileName = target.profile ?? target.name
+    const capabilities = await this.capabilityCache.probeViaTransport(createCapabilityTransport(target), profileName)
+    this.logger.info("Remote capabilities", { profile: profileName, caps: capabilities })
+    return capabilities
+  }
+
   private async execRemoteTmux(
     target: ResolvedSshTarget,
+    tmuxPath: string,
     args: readonly string[],
     action: string,
     sessionId?: string,
   ): Promise<SystemSshCommandResult> {
-    const result = await this.commandExecutor(target, ["tmux", ...args], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
+    const result = await this.commandExecutor(target, [tmuxPath, ...args], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
     if (result.exitCode === 0) return result
     throw this.toRemoteTmuxError(target, result, action, sessionId)
   }
@@ -733,17 +754,17 @@ export class SshTmuxProvider implements TerminalProvider {
     })
   }
 
-  private async applyEnvironment(target: ResolvedSshTarget, env: Record<string, string> | undefined): Promise<void> {
+  private async applyEnvironment(target: ResolvedSshTarget, tmuxPath: string, env: Record<string, string> | undefined): Promise<void> {
     if (env === undefined) return
     for (const [key, value] of Object.entries(env)) {
-      await this.execRemoteTmux(target, ["set-environment", "-g", key, value], "set-environment")
+      await this.execRemoteTmux(target, tmuxPath, ["set-environment", "-g", key, value], "set-environment")
     }
   }
 
-  private async clearEnvironment(target: ResolvedSshTarget, env: Record<string, string> | undefined): Promise<void> {
+  private async clearEnvironment(target: ResolvedSshTarget, tmuxPath: string, env: Record<string, string> | undefined): Promise<void> {
     if (env === undefined) return
     for (const key of Object.keys(env)) {
-      const result = await this.commandExecutor(target, ["tmux", "set-environment", "-gu", key], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
+      const result = await this.commandExecutor(target, [tmuxPath, "set-environment", "-gu", key], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
       if (result.exitCode !== 0) {
         this.logger.warn("ssh-tmux environment cleanup failed", {
           profile: target.profile ?? target.name,
@@ -779,28 +800,28 @@ export class SshTmuxProvider implements TerminalProvider {
   }
 
   private async readTitle(tracked: SshTmuxSession, sessionId: string): Promise<string> {
-    const titleResult = await this.execRemoteTmux(tracked.target, ["display-message", "-t", tracked.tmuxId, "-p", "#{session_name}"], "title", sessionId)
+    const titleResult = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["display-message", "-t", tracked.tmuxId, "-p", "#{session_name}"], "title", sessionId)
     return titleResult.stdout.trim()
   }
 
   private async readPaneHistoryLineCount(tracked: SshTmuxSession, sessionId: string): Promise<number | undefined> {
-    const result = await this.execRemoteTmux(tracked.target, ["display-message", "-t", tracked.tmuxId, "-p", "#{history_size}"], "history-size", sessionId)
+    const result = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["display-message", "-t", tracked.tmuxId, "-p", "#{history_size}"], "history-size", sessionId)
     return parsePositiveInteger(result.stdout.trim())
   }
 
-  private async readDimensionsForTarget(target: ResolvedSshTarget, tmuxId: string, sessionId: string): Promise<{ cols: number; rows: number }> {
-    const result = await this.execRemoteTmux(target, ["display-message", "-t", tmuxId, "-p", "#{window_width} #{window_height}"], "dimensions", sessionId)
+  private async readDimensionsForTarget(target: ResolvedSshTarget, tmuxPath: string, tmuxId: string, sessionId: string): Promise<{ cols: number; rows: number }> {
+    const result = await this.execRemoteTmux(target, tmuxPath, ["display-message", "-t", tmuxId, "-p", "#{window_width} #{window_height}"], "dimensions", sessionId)
     return parseDimensions(result.stdout)
   }
 
-  private async readTitleForTarget(target: ResolvedSshTarget, tmuxId: string, sessionId: string): Promise<string> {
-    const titleResult = await this.execRemoteTmux(target, ["display-message", "-t", tmuxId, "-p", "#{session_name}"], "title", sessionId)
+  private async readTitleForTarget(target: ResolvedSshTarget, tmuxPath: string, tmuxId: string, sessionId: string): Promise<string> {
+    const titleResult = await this.execRemoteTmux(target, tmuxPath, ["display-message", "-t", tmuxId, "-p", "#{session_name}"], "title", sessionId)
     return titleResult.stdout.trim()
   }
 
-  private async listTmuxSessionsForTarget(target: ResolvedSshTarget): Promise<SshTmuxListEntry[]> {
+  private async listTmuxSessionsForTarget(target: ResolvedSshTarget, tmuxPath: string): Promise<SshTmuxListEntry[]> {
     const format = ["#{session_name}", "#{session_created}", "#{window_width}", "#{window_height}"].join(LIST_SEPARATOR)
-    const result = await this.commandExecutor(target, ["tmux", "list-sessions", "-F", format], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
+    const result = await this.commandExecutor(target, [tmuxPath, "list-sessions", "-F", format], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
     if (result.exitCode !== 0) {
       const output = `${result.stderr}\n${result.stdout}`.trim()
       if (isRemoteSessionMissing(output)) return []
@@ -809,12 +830,12 @@ export class SshTmuxProvider implements TerminalProvider {
     return parseTmuxListSessionsOutput(result.stdout)
   }
 
-  private uniqueTrackedTargets(): Array<{ key: string; target: ResolvedSshTarget }> {
-    const result = new Map<string, ResolvedSshTarget>()
+  private uniqueTrackedTargets(): Array<{ key: string; target: ResolvedSshTarget; tmuxPath: string }> {
+    const result = new Map<string, { target: ResolvedSshTarget; tmuxPath: string }>()
     for (const tracked of this.sessions.values()) {
-      if (!result.has(tracked.targetKey)) result.set(tracked.targetKey, tracked.target)
+      if (!result.has(tracked.targetKey)) result.set(tracked.targetKey, { target: tracked.target, tmuxPath: tracked.tmuxPath })
     }
-    return Array.from(result.entries()).map(([key, target]) => ({ key, target }))
+    return Array.from(result.entries()).map(([key, value]) => ({ key, target: value.target, tmuxPath: value.tmuxPath }))
   }
 
   private createExternalListSession(target: ResolvedSshTarget, entry: SshTmuxListEntry): TerminalSession {
@@ -863,8 +884,11 @@ function parsePositiveInteger(value: string): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-function buildLoginInteractiveShellCommand(command: string, args: string[]): string {
-  return `exec $SHELL -l -ic ${shellQuote(buildShellExecCommand(command, args))}`
+function buildLoginInteractiveShellCommand(command: string, args: string[], capabilities: Pick<RemoteCapabilities, "os" | "shell">): string {
+  if (isWindowsRemoteOs(capabilities.os)) {
+    return `${capabilities.shell} /c ${windowsCmdQuote([command, ...args].map(windowsCmdQuote).join(" "))}`
+  }
+  return `exec ${shellQuote(capabilities.shell)} -l -ic ${shellQuote(buildShellExecCommand(command, args))}`
 }
 
 function buildShellExecCommand(command: string, args: string[]): string {
@@ -895,6 +919,63 @@ function mergeRemoteEnv(profileEnv: Record<string, string> | undefined, inputEnv
 
 function targetKey(target: ResolvedSshTarget): string {
   return target.profile ?? target.name
+}
+
+function createCapabilityTransport(target: ResolvedSshTarget): SystemSshTransport {
+  const keyFile = target.auth.type === "key-file" ? expandUserPath(target.auth.path) : undefined
+  return {
+    execRemote: async (command, timeoutMs) => {
+      const result = await execRemote(target, command, {
+        keyFile,
+        connectTimeoutMs: target.connectTimeoutMs,
+        execTimeoutMs: timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
+      })
+      return { stdout: result.stdout, stderr: result.stderr }
+    },
+  }
+}
+
+function ensureRemoteTmuxUsable(provider: ProviderName, target: ResolvedSshTarget, capabilities: RemoteCapabilities): string {
+  const profileName = target.profile ?? target.name
+  if (capabilities.tmuxPath === null) {
+    throw new TerminalUseError({
+      code: "REMOTE_TMUX_NOT_AVAILABLE",
+      message: `tmux is not installed on remote host ${profileName}`,
+      provider,
+      retryable: false,
+      hint: "Install tmux on the remote host or use ssh-pty",
+      details: { profile: profileName, capabilities },
+    })
+  }
+  if (capabilities.tmuxVersion !== null && !isSupportedTmuxVersion(capabilities.tmuxVersion)) {
+    throw new TerminalUseError({
+      code: "REMOTE_TMUX_NOT_AVAILABLE",
+      message: `Remote tmux version ${capabilities.tmuxVersion} on ${profileName} is too old; require tmux >= 3.2`,
+      provider,
+      retryable: false,
+      hint: "Upgrade tmux on the remote host to 3.2 or newer",
+      details: { profile: profileName, required: "3.2", actual: capabilities.tmuxVersion, capabilities },
+    })
+  }
+  return capabilities.tmuxPath
+}
+
+function isSupportedTmuxVersion(version: string): boolean {
+  const parsed = /^tmux\s+(\d+)\.(\d+)/u.exec(version)
+  if (parsed === null) return true
+  const major = Number(parsed[1])
+  const minor = Number(parsed[2])
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) return true
+  return major > 3 || (major === 3 && minor >= 2)
+}
+
+function isWindowsRemoteOs(os: string): boolean {
+  return /^(Windows|Windows_NT)/iu.test(os) || /(?:MINGW|MSYS|CYGWIN)/iu.test(os)
+}
+
+function windowsCmdQuote(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/u.test(value)) return value
+  return `"${value.replace(/["^&|<>%]/gu, (char) => `^${char}`)}"`
 }
 
 function parseAttachTarget(value: string): { profile: string; tmuxId: string } | undefined {

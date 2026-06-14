@@ -183,19 +183,28 @@ describe("SshPtyDirtyTracker", () => {
 })
 
 describe("buildRemoteExecCommand", () => {
-  it("通过远端 $SHELL login interactive shell 执行原始命令", () => {
+  it("通过探测到的远端 shell 执行原始命令", () => {
     const innerCommand = `cd ${shellQuote("/home/tester/project")} && ${buildShellExecCommand("node", ["app.js"])}`
 
-    expect(buildRemoteExecCommand("node", ["app.js"], "/home/tester/project"))
-      .toBe(`exec $SHELL -l -ic ${shellQuote(innerCommand)}`)
+    expect(buildRemoteExecCommand("node", ["app.js"], "/home/tester/project", { os: "Linux", shell: "/bin/bash" }))
+      .toBe(`exec ${shellQuote("/bin/bash")} -l -ic ${shellQuote(innerCommand)}`)
   })
 
   it("嵌套单引号参数保持不可逃逸的 shell token", () => {
-    const command = buildRemoteExecCommand("node", ["it's ok"], "/tmp/a'b")
+    const command = buildRemoteExecCommand("node", ["it's ok"], "/tmp/a'b", { os: "Linux", shell: "/bin/zsh" })
 
-    expect(command).toContain("exec $SHELL -l -ic")
+    expect(command).toContain(`exec ${shellQuote("/bin/zsh")} -l -ic`)
     expect(command).toContain("\\''")
     expect(command).not.toContain("; node")
+  })
+
+  it("Windows target 不使用 Unix login interactive flags", () => {
+    const command = buildRemoteExecCommand("node", ["app.js"], "C:\\Users\\dev", { os: "Windows", shell: "cmd.exe" })
+
+    expect(command).toContain("cmd.exe /c")
+    expect(command).not.toContain("-l -ic")
+    expect(command).toContain("node")
+    expect(command).toContain("app.js")
   })
 })
 

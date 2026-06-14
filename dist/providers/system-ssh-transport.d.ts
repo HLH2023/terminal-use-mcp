@@ -28,8 +28,19 @@ export type SystemSshCommandResult = {
     stderr: string;
     exitCode: number | null;
 };
+export type ExecRemoteResult = {
+    stdout: string;
+    stderr: string;
+};
+/** Transport interface for raw remote SSH command execution. */
+export interface SystemSshTransport {
+    /** Execute an arbitrary command on the remote host via SSH. Returns stdout and stderr. */
+    execRemote(command: string, timeoutMs?: number): Promise<ExecRemoteResult>;
+}
 /** 供测试和 Provider 复用的系统 ssh argv 构造函数。 */
 export declare function buildSshCommandArgs(target: SystemSshTarget, remoteArgs: readonly string[], options?: ExecSshCommandOptions): string[];
+/** Build argv for a raw remote command string executed by the remote login shell. */
+export declare function buildSshRawCommandArgs(target: SystemSshTarget, command: string, options?: ExecSshCommandOptions): string[];
 /**
  * POSIX shell argv 转义。
  *
@@ -39,5 +50,7 @@ export declare function buildSshCommandArgs(target: SystemSshTarget, remoteArgs:
 export declare function quoteRemoteArg(value: string): string;
 /** 系统 SSH 命令执行器 — 使用参数数组，禁止 shell 字符串拼接。 */
 export declare function execSshCommand(target: SystemSshTarget, remoteArgs: readonly string[], options?: ExecSshCommandOptions): Promise<SystemSshCommandResult>;
+/** Execute an arbitrary raw command on the remote host via SSH. */
+export declare function execRemote(target: SystemSshTarget, command: string, options?: ExecSshCommandOptions): Promise<SystemSshCommandResult>;
 /** 检查系统 ssh 是否在 PATH 中可执行；不读取任何用户 SSH 配置或发起连接。 */
 export declare function isSystemSshAvailable(): Promise<boolean>;

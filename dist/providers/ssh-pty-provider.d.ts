@@ -16,6 +16,7 @@ import type { ExportOptions, FindResult, MouseClickInput, MouseScrollInput, Prov
 import type { Logger } from "../logger.js";
 import type { ParsedKeyExpr } from "../terminal/keymap.js";
 import type { TerminalSnapshot } from "../terminal/terminal-snapshot.js";
+import { type RemoteCapabilities, type RemoteCapabilityCache } from "../targets/remote-capability-cache.js";
 import { type ResolvedSshTarget } from "../targets/ssh-profile-loader.js";
 import type { SshAuthRef, SshHostProfile, TerminalTarget } from "../targets/target-types.js";
 export type SshPtyProviderOptions = {
@@ -23,6 +24,8 @@ export type SshPtyProviderOptions = {
     hostsConfig?: ReadonlyMap<string, SshHostProfile>;
     /** 生产路径默认从 TERMINAL_USE_HOSTS_CONFIG / XDG 位置读取。 */
     hostsConfigPath?: string;
+    /** 远端能力缓存；测试可注入独立实例，生产默认使用模块级 singleton。 */
+    capabilityCache?: RemoteCapabilityCache;
 };
 export type SshPtyAuthConnectConfig = {
     authType: "agent";
@@ -62,6 +65,7 @@ export declare class SshPtyProvider implements TerminalProvider {
     private readonly sessions;
     private readonly logger;
     private readonly options;
+    private readonly capabilityCache;
     constructor(logger: Logger, options?: SshPtyProviderOptions);
     /** ssh2 是 package dependency，安装后即可用；无 native addon 动态失败路径。 */
     isAvailable(): Promise<boolean>;
@@ -113,6 +117,7 @@ export declare function shellQuote(value: string): string;
 export declare function buildShellExecCommand(command: string, args: string[]): string;
 /**
  * ssh2 exec request 只能发送 command string；这里用严格转义构造：
- * exec $SHELL -l -ic 'cd <cwd> && exec <command> <args...>'
+ * Unix: exec <remote-shell> -l -ic 'cd <cwd> && exec <command> <args...>'
+ * Windows: <remote-shell> /c "cd <cwd> && <command> <args...>"
  */
-export declare function buildRemoteExecCommand(command: string, args: string[], cwd: string): string;
+export declare function buildRemoteExecCommand(command: string, args: string[], cwd: string, capabilities?: Pick<RemoteCapabilities, "os" | "shell">): string;

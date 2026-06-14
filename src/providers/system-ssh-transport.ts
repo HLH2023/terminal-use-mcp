@@ -45,6 +45,17 @@ export type SystemSshCommandResult = {
   exitCode: number | null
 }
 
+export type ExecRemoteResult = {
+  stdout: string
+  stderr: string
+}
+
+/** Transport interface for raw remote SSH command execution. */
+export interface SystemSshTransport {
+  /** Execute an arbitrary command on the remote host via SSH. Returns stdout and stderr. */
+  execRemote(command: string, timeoutMs?: number): Promise<ExecRemoteResult>
+}
+
 type ExecFileErrorLike = Error & {
   code?: string | number
   signal?: NodeJS.Signals | null
@@ -57,27 +68,16 @@ export function buildSshCommandArgs(
   remoteArgs: readonly string[],
   options: ExecSshCommandOptions = {},
 ): string[] {
-  const connectTimeoutSeconds = toOpenSshTimeoutSeconds(options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS)
-  const sshArgs: string[] = [
-    "-p",
-    String(target.port),
-    "-o",
-    "StrictHostKeyChecking=yes",
-    "-o",
-    `ConnectTimeout=${connectTimeoutSeconds}`,
-    "-o",
-    "BatchMode=yes",
-    `${target.username}@${target.host}`,
-    "--",
-    ...remoteArgs.map(quoteRemoteArg),
-  ]
+  return [...buildBaseSshArgs(target, options), "--", ...remoteArgs.map(quoteRemoteArg)]
+}
 
-  if (options.keyFile !== undefined) {
-    // 与 OpenSSH 惯例一致：-i 放在 host 前，且作为独立 argv 传入。
-    sshArgs.unshift("-i", options.keyFile)
-  }
-
-  return sshArgs
+/** Build argv for a raw remote command string executed by the remote login shell. */
+export function buildSshRawCommandArgs(
+  target: SystemSshTarget,
+  command: string,
+  options: ExecSshCommandOptions = {},
+): string[] {
+  return [...buildBaseSshArgs(target, options), "--", command]
 }
 
 /**
@@ -100,7 +100,63 @@ export async function execSshCommand(
 ): Promise<SystemSshCommandResult> {
   const args = buildSshCommandArgs(target, remoteArgs, options)
   const execTimeoutMs = options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS
+  return executeSshFile(target, args, options, execTimeoutMs)
+}
 
+/** Execute an arbitrary raw command on the remote host via SSH. */
+export async function execRemote(
+  target: SystemSshTarget,
+  command: string,
+  options: ExecSshCommandOptions = {},
+): Promise<SystemSshCommandResult> {
+  const args = buildSshRawCommandArgs(target, command, options)
+  const execTimeoutMs = options.execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS
+
+  return executeSshFile(target, args, options, execTimeoutMs)
+}
+
+/** 检查系统 ssh 是否在 PATH 中可执行；不读取任何用户 SSH 配置或发起连接。 */
+export async function isSystemSshAvailable(): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    execFile("ssh", ["-V"], { timeout: SSH_VERSION_TIMEOUT_MS }, (error) => {
+      resolve(error === null)
+    })
+  })
+}
+
+function toOpenSshTimeoutSeconds(timeoutMs: number): number {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Math.ceil(DEFAULT_CONNECT_TIMEOUT_MS / 1000)
+  return Math.max(1, Math.ceil(timeoutMs / 1000))
+}
+
+function buildBaseSshArgs(target: SystemSshTarget, options: ExecSshCommandOptions): string[] {
+  const connectTimeoutSeconds = toOpenSshTimeoutSeconds(options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS)
+  const sshArgs: string[] = [
+    "-p",
+    String(target.port),
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    `ConnectTimeout=${connectTimeoutSeconds}`,
+    "-o",
+    "BatchMode=yes",
+    `${target.username}@${target.host}`,
+  ]
+
+  if (options.keyFile !== undefined) {
+    // 与 OpenSSH 惯例一致：-i 放在 host 前，且作为独立 argv 传入。
+    sshArgs.unshift("-i", options.keyFile)
+  }
+
+  return sshArgs
+}
+
+function executeSshFile(
+  target: SystemSshTarget,
+  args: readonly string[],
+  options: ExecSshCommandOptions,
+  execTimeoutMs: number,
+): Promise<SystemSshCommandResult> {
   return new Promise<SystemSshCommandResult>((resolve, reject) => {
     execFile("ssh", args, { timeout: execTimeoutMs, maxBuffer: SSH_MAX_BUFFER_BYTES }, (error, stdout, stderr) => {
       const normalizedStdout = stdout ?? ""
@@ -135,25 +191,9 @@ export async function execSshCommand(
         return
       }
 
-      // 远端命令非零退出（例如 tmux 找不到 session）交给上层 provider 解析，
-      // 这样可以映射到 SESSION_NOT_FOUND / REMOTE_TMUX_NOT_AVAILABLE 等业务错误。
       resolve({ stdout: normalizedStdout, stderr: normalizedStderr, exitCode })
     })
   })
-}
-
-/** 检查系统 ssh 是否在 PATH 中可执行；不读取任何用户 SSH 配置或发起连接。 */
-export async function isSystemSshAvailable(): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    execFile("ssh", ["-V"], { timeout: SSH_VERSION_TIMEOUT_MS }, (error) => {
-      resolve(error === null)
-    })
-  })
-}
-
-function toOpenSshTimeoutSeconds(timeoutMs: number): number {
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Math.ceil(DEFAULT_CONNECT_TIMEOUT_MS / 1000)
-  return Math.max(1, Math.ceil(timeoutMs / 1000))
 }
 
 function formatSshTarget(target: SystemSshTarget): string {

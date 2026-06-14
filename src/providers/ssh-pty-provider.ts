@@ -13,6 +13,7 @@
  */
 
 import { readFile } from "node:fs/promises"
+import path from "node:path"
 
 import { Client } from "ssh2"
 import type { ClientChannel, ConnectConfig, PseudoTtyOptions } from "ssh2"
@@ -68,6 +69,7 @@ import { safeCleanup } from "../terminal/safe-cleanup.js"
 import { computeHostFingerprint, verifyPinnedFingerprint } from "../targets/host-fingerprint.js"
 import { parseKnownHosts, type KnownHostEntry } from "../targets/known-hosts.js"
 import { createRemoteCwdPolicy, resolveRemoteCwd } from "../targets/remote-cwd-policy.js"
+import { remoteCapabilityCache, type RemoteCapabilities, type RemoteCapabilityCache } from "../targets/remote-capability-cache.js"
 import { loadHostsConfig } from "../targets/ssh-host-config.js"
 import { resolveSshAuth } from "../targets/ssh-auth.js"
 import { resolveSshTarget, type ResolvedSshTarget } from "../targets/ssh-profile-loader.js"
@@ -108,6 +110,8 @@ export type SshPtyProviderOptions = {
   hostsConfig?: ReadonlyMap<string, SshHostProfile>
   /** 生产路径默认从 TERMINAL_USE_HOSTS_CONFIG / XDG 位置读取。 */
   hostsConfigPath?: string
+  /** 远端能力缓存；测试可注入独立实例，生产默认使用模块级 singleton。 */
+  capabilityCache?: RemoteCapabilityCache
 }
 
 export type SshPtyAuthConnectConfig =
@@ -192,11 +196,13 @@ export class SshPtyProvider implements TerminalProvider {
   private readonly sessions: Map<string, SshPtySession>
   private readonly logger: Logger
   private readonly options: SshPtyProviderOptions
+  private readonly capabilityCache: RemoteCapabilityCache
 
   constructor(logger: Logger, options?: SshPtyProviderOptions) {
     this.sessions = new Map()
     this.logger = logger
     this.options = options ?? {}
+    this.capabilityCache = this.options.capabilityCache ?? remoteCapabilityCache
   }
 
   /** ssh2 是 package dependency，安装后即可用；无 native addon 动态失败路径。 */
@@ -242,6 +248,9 @@ export class SshPtyProvider implements TerminalProvider {
 
     try {
       await connectSshClient(client, connectConfig, resolvedTarget, () => hostKeyError)
+      const profileName = remoteCapabilityProfileName(resolvedTarget)
+      const caps = await this.capabilityCache.probe(client, profileName)
+      this.logger.info("Remote capabilities", { profile: profileName, caps })
       const channel = await openRemotePtyExecChannel(client, {
         command: input.command,
         args: input.args,
@@ -249,6 +258,7 @@ export class SshPtyProvider implements TerminalProvider {
         cols: input.cols,
         rows: input.rows,
         env: { ...(resolvedTarget.env ?? {}), ...(input.env ?? {}) },
+        capabilities: caps,
       })
 
       const metadata = createSshSessionMetadata(resolvedTarget, auth.authType, cwd, input, verifiedFingerprint, createdAt)
@@ -867,11 +877,21 @@ export function buildShellExecCommand(command: string, args: string[]): string {
 
 /**
  * ssh2 exec request 只能发送 command string；这里用严格转义构造：
- * exec $SHELL -l -ic 'cd <cwd> && exec <command> <args...>'
+ * Unix: exec <remote-shell> -l -ic 'cd <cwd> && exec <command> <args...>'
+ * Windows: <remote-shell> /c "cd <cwd> && <command> <args...>"
  */
-export function buildRemoteExecCommand(command: string, args: string[], cwd: string): string {
+export function buildRemoteExecCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  capabilities: Pick<RemoteCapabilities, "os" | "shell"> = { os: "Unknown", shell: "/bin/sh" },
+): string {
+  if (isWindowsRemoteOs(capabilities.os)) {
+    return buildWindowsRemoteExecCommand(command, args, cwd, capabilities.shell)
+  }
+
   const innerCommand = `cd ${shellQuote(cwd)} && ${buildShellExecCommand(command, args)}`
-  return `exec $SHELL -l -ic ${shellQuote(innerCommand)}`
+  return `exec ${shellQuote(capabilities.shell)} -l -ic ${shellQuote(innerCommand)}`
 }
 
 type OpenExecOptions = {
@@ -881,6 +901,7 @@ type OpenExecOptions = {
   cols: number
   rows: number
   env: Record<string, string>
+  capabilities: Pick<RemoteCapabilities, "os" | "shell">
 }
 
 function connectSshClient(
@@ -932,7 +953,7 @@ function openRemotePtyExecChannel(client: Client, options: OpenExecOptions): Pro
       width: DEFAULT_PIXEL_WIDTH,
       height: DEFAULT_PIXEL_HEIGHT,
     }
-    const command = buildRemoteExecCommand(options.command, options.args, options.cwd)
+    const command = buildRemoteExecCommand(options.command, options.args, options.cwd, options.capabilities)
 
     client.exec(command, { pty, env: options.env }, (error, channel) => {
       if (error !== undefined) {
@@ -1014,6 +1035,39 @@ function mapSshClientError(target: ResolvedSshTarget, error: Error, timeoutMs: n
 
 function formatTargetHost(target: ResolvedSshTarget): string {
   return `${target.username}@${target.host}:${target.port}`
+}
+
+function remoteCapabilityProfileName(target: ResolvedSshTarget): string {
+  return target.profile ?? target.name
+}
+
+function isWindowsRemoteOs(os: string): boolean {
+  return /^(Windows|Windows_NT)/iu.test(os) || /(?:MINGW|MSYS|CYGWIN)/iu.test(os)
+}
+
+function buildWindowsRemoteExecCommand(command: string, args: string[], cwd: string, shell: string): string {
+  if (isPowerShell(shell)) {
+    const commandLine = `Set-Location -LiteralPath ${powerShellSingleQuote(cwd)}; & ${[command, ...args].map(powerShellSingleQuote).join(" ")}`
+    return `${shell} -NoProfile -Command ${windowsCmdQuote(commandLine)}`
+  }
+
+  const commandLine = `cd ${windowsCmdQuote(cwd)} && ${[command, ...args].map(windowsCmdQuote).join(" ")}`
+  return `${shell} /c ${windowsCmdQuote(commandLine)}`
+}
+
+function isPowerShell(shell: string): boolean {
+  const winBase = path.win32.basename(shell).toLowerCase()
+  const posixBase = path.posix.basename(shell).toLowerCase()
+  return [winBase, posixBase].some((base) => base === "powershell.exe" || base === "pwsh.exe")
+}
+
+function windowsCmdQuote(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/u.test(value)) return value
+  return `"${value.replace(/["^&|<>%]/gu, (char) => `^${char}`)}"`
+}
+
+function powerShellSingleQuote(value: string): string {
+  return `'${value.replace(/'/gu, "''")}'`
 }
 
 function normalizeChannelData(chunk: Buffer | string): string {

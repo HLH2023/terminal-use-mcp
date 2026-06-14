@@ -26,6 +26,9 @@ export {
   resolveRemoteCwd,
 } from "./remote-cwd-policy.js"
 
+export type { RemoteCapabilities } from "./remote-capability-cache.js"
+export { RemoteCapabilityCache, parseProbeOutput, remoteCapabilityCache } from "./remote-capability-cache.js"
+
 export type { LocalTargetInfo, SshTargetInfo, TargetInfo } from "./target-registry.js"
 export { getTargetInfo, listTargets } from "./target-registry.js"
 

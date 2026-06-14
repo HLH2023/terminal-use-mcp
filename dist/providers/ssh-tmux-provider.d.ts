@@ -5,6 +5,7 @@ import type { Logger } from "../logger.js";
 import type { SshHostProfile } from "../targets/target-types.js";
 import type { ResolvedSshTarget } from "../targets/ssh-profile-loader.js";
 import type { SystemSshCommandResult } from "./system-ssh-transport.js";
+import { type RemoteCapabilityCache } from "../targets/remote-capability-cache.js";
 export type ExecSshTmuxOptions = {
     timeoutMs?: number;
 };
@@ -14,6 +15,7 @@ export type SshTmuxProviderOptions = {
     hostsConfigPath?: string;
     commandExecutor?: SshTmuxCommandExecutor;
     sshAvailabilityChecker?: () => Promise<boolean>;
+    capabilityCache?: RemoteCapabilityCache;
 };
 export type SshTmuxListEntry = {
     name: string;
@@ -38,6 +40,7 @@ export declare class SshTmuxProvider implements TerminalProvider {
     private readonly hostsConfigPath?;
     private readonly commandExecutor;
     private readonly sshAvailabilityChecker;
+    private readonly capabilityCache;
     private sshAvailable;
     constructor(logger: Logger, options?: SshTmuxProviderOptions);
     isAvailable(): Promise<boolean>;
@@ -64,6 +67,7 @@ export declare class SshTmuxProvider implements TerminalProvider {
     private resolveAttachTarget;
     private loadHostProfiles;
     private ensureSystemSshAvailable;
+    private discoverCapabilities;
     private execRemoteTmux;
     private toRemoteTmuxError;
     private applyEnvironment;
