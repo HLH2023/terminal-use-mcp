@@ -83,6 +83,7 @@ export async function loadHostsConfig(configPath, env = process.env) {
     // 对含 sshConfigHost 的 profile，从 OpenSSH config 合并连接参数
     const sshConfig = await parseSshConfig();
     profiles = mergeSshConfigProfiles(profiles, sshConfig);
+    applyProxyJumpEnvDefault(profiles, env);
     // 统一为缺少 knownHosts 的 profile 填充平台默认值 ~/.ssh/known_hosts
     applyKnownHostsDefault(profiles);
     cachedConfigPath = resolvedPath;
@@ -217,6 +218,7 @@ function overlayToProfile(name, overlay) {
         auth,
         knownHosts: typeof overlay.knownHosts === "string" ? overlay.knownHosts : undefined,
         pinnedHostFingerprint: typeof overlay.pinnedHostFingerprint === "string" ? overlay.pinnedHostFingerprint : undefined,
+        proxyJump: typeof overlay.proxyJump === "string" ? overlay.proxyJump : undefined,
         defaultCwd: typeof overlay.defaultCwd === "string" ? overlay.defaultCwd : undefined,
         remoteAllowedCwd: Array.isArray(overlay.remoteAllowedCwd)
             ? overlay.remoteAllowedCwd.filter((v) => typeof v === "string")
@@ -225,7 +227,7 @@ function overlayToProfile(name, overlay) {
             ? overlay.remoteDeniedCwd.filter((v) => typeof v === "string")
             : undefined,
         allowTmux: typeof overlay.allowTmux === "boolean" ? overlay.allowTmux : undefined,
-        env: isStringRecord(overlay.env) ? overlay.env : undefined,
+        env: stripProxyJumpFromEnv(isStringRecord(overlay.env) ? overlay.env : undefined),
         connectTimeoutMs: typeof overlay.connectTimeoutMs === "number" ? overlay.connectTimeoutMs : undefined,
         keepaliveIntervalMs: typeof overlay.keepaliveIntervalMs === "number" ? overlay.keepaliveIntervalMs : undefined,
     };
@@ -290,6 +292,8 @@ function mergeSshConfigProfiles(profiles, sshConfig) {
             port: profile.port || sshEntry.port,
             username: profile.username || sshEntry.username || "",
             knownHosts: profile.knownHosts || sshEntry.userKnownHostsFile || defaultKnownHosts,
+            proxyJump: profile.proxyJump ?? sshEntry.proxyJump,
+            env: stripProxyJumpFromEnv(profile.env),
         };
         // 如果 profile auth 是默认 agent 且 SSH config 有 IdentityFile → 改为 key-file
         if (profile.auth.type === "agent" && sshEntry.identityFiles.length > 0) {
@@ -303,13 +307,6 @@ function mergeSshConfigProfiles(profiles, sshConfig) {
                 };
             }
         }
-        // 保留 SSH config 的 ProxyJump 信息（作为环境变量传递给 ssh2）
-        if (sshEntry.proxyJump !== undefined && merged.env === undefined) {
-            merged.env = {};
-        }
-        if (sshEntry.proxyJump !== undefined && merged.env !== undefined) {
-            merged.env.SSH_PROXY_JUMP = sshEntry.proxyJump;
-        }
         result.set(name, merged);
     }
     return result;
@@ -322,6 +319,15 @@ function applyKnownHostsDefault(profiles) {
             profile.knownHosts = defaultPath;
             logger.debug("Applied default knownHosts to profile", { profile: name, path: defaultPath });
         }
+    }
+}
+function applyProxyJumpEnvDefault(profiles, env) {
+    const proxyJump = env.SSH_PROXY_JUMP?.trim();
+    if (proxyJump === undefined || proxyJump.length === 0)
+        return;
+    for (const profile of profiles.values()) {
+        profile.proxyJump ??= proxyJump;
+        profile.env = stripProxyJumpFromEnv(profile.env);
     }
 }
 // ── 旧格式解析（保留向后兼容） ───────────────────────────────
@@ -370,7 +376,11 @@ function validateLegacyProfile(value, fallbackName, sourcePath) {
         const errorSummary = result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join("; ");
         throw new Error(`SSH profile "${fallbackName ?? "<unknown>"}" validation failed in ${sourcePath}: ${errorSummary}`);
     }
-    return result.data;
+    const profile = result.data;
+    return {
+        ...profile,
+        env: stripProxyJumpFromEnv(profile.env),
+    };
 }
 function ensureNoForbiddenSecretKeys(value, label) {
     for (const key of Object.keys(value)) {
@@ -387,6 +397,16 @@ function isStringRecord(value) {
     if (!isRecord(value))
         return false;
     return Object.values(value).every((v) => typeof v === "string");
+}
+function stripProxyJumpFromEnv(env) {
+    if (env === undefined)
+        return undefined;
+    const sanitized = {};
+    for (const [key, value] of Object.entries(env)) {
+        if (key !== "SSH_PROXY_JUMP")
+            sanitized[key] = value;
+    }
+    return Object.keys(sanitized).length === 0 ? undefined : sanitized;
 }
 function hasNodeErrorCode(error, code) {
     return typeof error === "object" && error !== null && "code" in error && error.code === code;

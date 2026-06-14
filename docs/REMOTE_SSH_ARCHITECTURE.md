@@ -201,7 +201,7 @@ This prevents shell injection through remote arguments. Arguments are passed as 
 
 ### Proxy Jump Support
 
-If the SSH profile has `SSH_PROXY_JUMP` set (via OpenSSH config merge or explicit `env` field), the `ssh-tmux` provider passes it to the system `ssh` command via `-o ProxyJump=<value>`.
+If the SSH profile has `SSH_PROXY_JUMP` set (via OpenSSH config merge or explicit `env` field), the `ssh-tmux` provider passes it to the system `ssh` command via `-o ProxyJump=<value>`. ProxyJump support requires explicit profile configuration; the `SSH_PROXY_JUMP` environment variable is NOT directly forwarded as an SSH option.
 
 Source: `src/providers/system-ssh-transport.ts`
 
@@ -312,7 +312,7 @@ When `auth.type` is `"agent"` and no explicit `socket` is configured, the system
 1. `SSH_AUTH_SOCK` environment variable (highest priority)
 2. `$XDG_RUNTIME_DIR/ssh-agent.socket` (systemd user service)
 3. `$XDG_RUNTIME_DIR/keyring/ssh` (GNOME Keyring)
-4. Runtime scan via `ss -xU | grep agent` (fallback)
+4. Runtime scan via `ss -x --no-header` (fallback)
 
 Source: `src/targets/ssh-auth.ts` → `getSshAgentSocket()`
 
@@ -416,7 +416,7 @@ This is disabled by default because inline targets bypass profile-based CWD poli
 | Limitation | Detail |
 |------------|--------|
 | **Per-command SSH overhead** | Every tmux operation (send-keys, capture-pane, etc.) opens a new SSH connection. This adds latency compared to the persistent channel in ssh-pty. |
-| **tmux 3.2+ required on remote** | Features like `capture-pane -e` (ANSI escape preservation) require tmux 3.2 or newer. Older versions may work with degraded highlight support. |
+| **tmux 3.2+ required on remote** | The server requires tmux 3.2+ for `resize-window` support. tmux <3.2 is rejected (fail-closed). |
 | **Snapshot-based parsing** | Highlights are parsed from periodic `capture-pane -e` snapshots, not from a real-time data stream. Rapidly changing screens may produce stale snapshots. |
 
 ### Cross-provider

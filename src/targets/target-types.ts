@@ -31,6 +31,7 @@ export type SshHostProfile = {
   auth: SshAuthRef
   knownHosts?: string
   pinnedHostFingerprint?: string
+  proxyJump?: string
   defaultCwd?: string
   remoteAllowedCwd: string[]
   remoteDeniedCwd?: string[]

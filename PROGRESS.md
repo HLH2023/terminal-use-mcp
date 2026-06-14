@@ -7,6 +7,58 @@
 
 ---
 
+## Final pre-release critical/high issues 修复记录（2026-06-14） ✅
+
+### 本会话新增/修改文件
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `src/terminal/command-safety.ts` | ✅ 更新 | 默认 denylist 与 allow/deny env 输入统一小写比较，修复 Windows 命令大小写绕过；wrapper base command 同步小写化 |
+| `src/providers/ssh-pty-provider.ts` | ✅ 更新 | Windows 远程 shell executable 路径含空格时加双引号，避免 `Program Files` 路径拆分 |
+| `src/providers/ssh-tmux-provider.ts` | ✅ 更新 | Windows 远程 shell 路径引用；tmux env 改为 `new-session -e KEY=VALUE` 注入；tmux version null / 不可解析 fail-closed |
+| `src/providers/tmux-provider.ts` | ✅ 更新 | 本地 tmux env 改为 `new-session -e KEY=VALUE` 注入，删除 `set-environment -g/-gu` 全局泄漏路径 |
+| `src/tools/tool-helpers.ts` | ✅ 更新 | `executeTmuxKillPreview()` list 失败时返回 `available=false` 与结构化 `reason`，消除空 catch |
+| `src/config.ts` | ✅ 更新 | artifacts 默认目录改为 `getDataDir()/artifacts`，兑现 `TERMINAL_USE_DATA_DIR` 文档 |
+| `src/tools/start.ts` / `src/tools/paste.ts` / `src/mcp-server.ts` | ✅ 更新 | `terminal.start` 与 `terminal.paste` 接收 `TerminalUseConfig`，默认 TTL/尺寸/粘贴限制不再硬编码 |
+| `src/session-manager.ts` | ✅ 更新 | 修正本地 tmux session 前缀 typo：`tumcup_` → `tumcp_` |
+| `src/targets/target-types.ts` / `src/targets/config-schema.ts` / `src/targets/ssh-host-config.ts` | ✅ 更新 | `proxyJump` 成为 SSH profile 一等字段；`SSH_PROXY_JUMP` 仅作为本地默认来源，不再写入远端 env |
+| `src/providers/system-ssh-transport.ts` | ✅ 更新 | 系统 ssh argv 构造支持 `-o ProxyJump=<value>`，并保持 host 参数之前传入 |
+| `tests/unit/*.test.ts` | ✅ 更新 | 补充 denylist 大小写、Windows shell quoting、tmux version fail-closed、ProxyJump/env sanitization 与 typo 回归测试 |
+| `README.md` / `README_zh.md` / `skills/terminal-use/SKILL.md` | ✅ 更新 | 同步 artifact 默认路径为 `<data-dir>/artifacts` |
+
+### 验证结果
+
+| 命令/检查 | 结果 |
+|-----------|------|
+| LSP diagnostics: 变更 TS/test 文件逐个检查 | ✅ 0 diagnostics |
+| `npx tsc --noEmit` | ✅ 零错误 |
+| `npm test` | ✅ 30 files passed / 607 tests passed |
+
+### 完成标准对照
+
+| 标准 | 状态 |
+|------|------|
+| Windows denylist / allowlist / env denylist 命令比较大小写不敏感 | ✅ |
+| SSH PTY 与 SSH tmux Windows shell 路径含空格时安全引用 | ✅ |
+| 本地/远程 tmux 不再使用 `set-environment -g` 或 `set-environment -gu` | ✅ |
+| 远程 tmux 版本缺失、null 或不可解析时 fail-closed | ✅ |
+| tmux kill preview 捕获 list 失败并返回结构化 reason | ✅ |
+| session TTL、默认 cols/rows、paste soft/hard limit 均使用 `TerminalUseConfig` | ✅ |
+| artifacts 默认目录改为 XDG data dir 下的 `artifacts` | ✅ |
+| `tumcp_` 本地 tmux session 前缀统一 | ✅ |
+| `SSH_PROXY_JUMP` 支持接入系统 ssh `ProxyJump` 参数，且不进入远端 env | ✅ |
+| 不修改 HomeLab 主业务 (`apps/*` / `packages/*`) | ✅ |
+| 不使用 `any` / `@ts-ignore` / `@ts-expect-error` | ✅ |
+
+### 技术笔记
+
+- tmux env 注入使用 `new-session -e KEY=VALUE` 绑定新 session 初始环境，避免 tmux server global environment 泄漏到其他 session。
+- `SSH_PROXY_JUMP` 现在只作为 profile `proxyJump` 的本地默认值；实际连接由系统 ssh argv 的 `-o ProxyJump=...` 承载，远端进程不再接收该 env。
+- `TERMINAL_USE_ARTIFACT_DIR` 仍可显式覆盖；未设置时默认跟随 `TERMINAL_USE_DATA_DIR` / XDG data dir。
+- 本次仅修改 `tools/local/terminal-use-mcp/`，未触碰 HomeLab 主业务、冻结规划或主任务板。
+
+---
+
 ## Remote Capability Discovery 实现记录（2026-06-14） ✅
 
 ### 本会话新增/修改文件

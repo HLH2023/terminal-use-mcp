@@ -163,6 +163,8 @@ export type TmuxKillPreviewResult = {
   name: string
   target: TmuxToolTargetSummary
   exists: boolean
+  available: boolean
+  reason: string | null
   isManaged: boolean
   managedSessionIds: string[]
   windows: number | null
@@ -246,6 +248,8 @@ export class ProviderExecutor {
     const providerName: ProviderName = target.kind === "local" ? "tmux" : "ssh-tmux"
 
     let exists = false
+    let available = true
+    let reason: string | null = null
     let windows: number | null = null
     let created: string | null = null
     try {
@@ -256,8 +260,9 @@ export class ProviderExecutor {
         windows = found.windows
         created = found.created
       }
-    } catch {
-      // list 失败不阻塞预览
+    } catch (error) {
+      available = false
+      reason = formatUnknownError(error)
     }
 
     const managedSessions = this.sm.listSessions().filter((session) => {
@@ -268,6 +273,8 @@ export class ProviderExecutor {
       name: tmuxName,
       target: this.summarizeTmuxTarget(target),
       exists,
+      available,
+      reason,
       isManaged: managedSessions.length > 0,
       managedSessionIds: managedSessions.map((s) => s.sessionId),
       windows,

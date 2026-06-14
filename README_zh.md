@@ -306,7 +306,7 @@ stdio 传输：stdout 保留给 MCP 协议，所有日志输出到 stderr。SIGI
 
 ## Skills（可选）
 
-terminal-use-mcp 附带一个**核心 skill**（`terminal-use`），教会 AI 代理如何正确使用 MCP 工具。另外还有**代理专属 skill**，用于控制外部 AI 代理 TUI。按需安装。
+terminal-use-mcp 提供一个**核心 skill**（`terminal-use`，可在 [GitHub 仓库](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills) 获取），教会 AI 代理如何正确使用 MCP 工具。另外还有**代理专属 skill**，用于控制外部 AI 代理 TUI。Skill 不包含在 npm 包中 — 需从 GitHub 下载。按需安装。
 
 | Skill | 目标代理 | 是否必需 | 安装 |
 |------|----------|----------|------|
@@ -370,7 +370,7 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `TERMINAL_USE_DEFAULT_PROVIDER` | 默认 provider（覆盖自动选择优先级） | `native-pty` |
 | `TERMINAL_USE_TMUX_PATH` | tmux 二进制的绝对或相对路径（当 tmux 不在 PATH 上时） | `tmux` |
 | `TERMINAL_USE_WORKSPACE_ROOT` | CWD 策略根目录 | 当前工作目录 |
-| `TERMINAL_USE_ALLOWED_CWD` | 允许的工作目录（逗号分隔） | 工作区根目录 |
+| `TERMINAL_USE_ALLOWED_CWD` | 允许的工作目录（逗号分隔） | _(空；工作区根目录始终通过 TERMINAL_USE_WORKSPACE_ROOT 允许)_ |
 | `TERMINAL_USE_ALLOW_COMMANDS` | 允许的命令，即使在内置黑名单中（逗号分隔，覆盖黑名单） | _(空)_ |
 | `TERMINAL_USE_DENY_COMMANDS` | 在内置黑名单之外额外拒绝的命令（逗号分隔） | _(空)_ |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | 黑名单命令处理方式：`deny`、`ask` 或 `allow` | `deny` |
@@ -386,14 +386,14 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `TERMINAL_USE_LARGE_PASTE_LIMIT` | 需要确认的粘贴大小阈值（字符数） | `2000` |
 | `TERMINAL_USE_HARD_PASTE_LIMIT` | 硬性粘贴大小上限 — 超过此大小一律拒绝（字符数） | `10000` |
 | `TERMINAL_USE_LOG_LEVEL` | 日志详细度：`debug`、`info`、`warn`、`error` | `info` |
-| `TERMINAL_USE_HOSTS_CONFIG` | SSH 主机配置文件路径 | `~/.config/terminal-use-mcp/hosts.json` |
+| `TERMINAL_USE_HOSTS_CONFIG` | SSH 主机配置文件路径 | XDG 配置目录 / hosts.json（profiles/*.json 优先） |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | 设为 `1` 允许在工具调用中内联指定 SSH 主机 | _(未设置 — 禁止)_ |
 
 #### 路径覆盖
 
 | 变量 | 用途 | 默认值 |
 |------|------|--------|
-| `TERMINAL_USE_ARTIFACT_DIR` | 覆盖 artifact/transcript 输出目录 | `<包目录>/artifacts` |
+| `TERMINAL_USE_ARTIFACT_DIR` | 覆盖 artifact/transcript 输出目录 | `<数据目录>/artifacts` |
 | `TERMINAL_USE_CONFIG_DIR` | 覆盖 XDG 配置目录 | 见下方 XDG/平台默认值 |
 | `TERMINAL_USE_CONFIG_FILE` | 覆盖 config.json 文件路径 | `<配置目录>/config.json` |
 | `TERMINAL_USE_DATA_DIR` | 覆盖 XDG 数据目录（artifact、session 数据） | 见下方 XDG/平台默认值 |
@@ -407,6 +407,7 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `XDG_RUNTIME_DIR` | XDG 运行时目录（用于 SSH agent socket 发现） | Linux |
 | `APPDATA` | Windows 漫游应用数据 — 应用追加 `terminal-use-mcp/` | Windows |
 | `LOCALAPPDATA` | Windows 本地应用数据 — 应用追加 `terminal-use-mcp/` | Windows |
+| `ComSpec` | Windows 命令解释器路径（native-pty shell 包装使用） | Windows |
 
 #### SSH 认证
 

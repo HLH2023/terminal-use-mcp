@@ -12,6 +12,7 @@ const tempDirs: string[] = []
 afterEach(async () => {
   delete process.env.TERMINAL_USE_HOSTS_CONFIG
   delete process.env.TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS
+  delete process.env.SSH_PROXY_JUMP
   clearHostsConfigCache()
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
@@ -75,6 +76,47 @@ describe("loadHostsConfig", () => {
     expect(devbox?.remoteAllowedCwd).toEqual(["/home/hlh/dev", "/srv/lab"])
     expect(devbox?.allowTmux).toBe(true)
     expect(devbox?.knownHosts).toContain("/.ssh/known_hosts")
+  })
+
+  it("ProxyJump 作为 profile 字段加载且不会进入远端 env", async () => {
+    const filePath = await writeHostsJson(JSON.stringify({
+      hosts: {
+        devbox: {
+          host: "192.168.1.20",
+          port: 22,
+          username: "hlh",
+          auth: { type: "agent" },
+          knownHosts: "~/.ssh/known_hosts",
+          remoteAllowedCwd: ["/home/hlh/dev"],
+          proxyJump: "bastion",
+          env: { SSH_PROXY_JUMP: "must-not-forward", FOO: "bar" },
+        },
+      },
+    }))
+
+    const profiles = await loadHostsConfig(filePath)
+    const devbox = profiles.get("devbox")
+    expect(devbox?.proxyJump).toBe("bastion")
+    expect(devbox?.env).toEqual({ FOO: "bar" })
+  })
+
+  it("SSH_PROXY_JUMP 环境变量作为 profile 默认 ProxyJump", async () => {
+    process.env.SSH_PROXY_JUMP = "env-bastion"
+    const filePath = await writeHostsJson(JSON.stringify({
+      hosts: {
+        devbox: {
+          host: "192.168.1.20",
+          port: 22,
+          username: "hlh",
+          auth: { type: "agent" },
+          knownHosts: "~/.ssh/known_hosts",
+          remoteAllowedCwd: ["/home/hlh/dev"],
+        },
+      },
+    }))
+
+    const profiles = await loadHostsConfig(filePath)
+    expect(profiles.get("devbox")?.proxyJump).toBe("env-bastion")
   })
 
   it("加载缺失文件返回空 map 且不抛错", async () => {

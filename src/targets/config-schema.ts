@@ -142,6 +142,7 @@ export const SshProfileOverlaySchema = z.object({
   auth: SshAuthRefSchema.optional(),
   knownHosts: z.string().min(1).optional(),
   pinnedHostFingerprint: z.string().min(1).optional(),
+  proxyJump: z.string().min(1).optional(),
 
   // ── terminal-use-mcp 自有扩展（overlay 模式下主要写这些） ──
   defaultCwd: z.string().min(1).optional(),
@@ -183,6 +184,7 @@ export const SshHostProfileSchema = z.object({
   auth: SshAuthRefSchema,
   knownHosts: z.string().min(1).optional(),
   pinnedHostFingerprint: z.string().min(1).optional(),
+  proxyJump: z.string().min(1).optional(),
   defaultCwd: z.string().min(1).optional(),
   /** 远程允许的工作目录范围（必须非空） */
   remoteAllowedCwd: z.array(z.string().min(1)).min(1),

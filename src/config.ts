@@ -11,9 +11,10 @@
  */
 
 import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import type { ProviderName } from "./providers/provider.js"
 import { logger } from "./logger.js"
-import { getConfigFilePath, ensureConfigDir } from "./targets/xdg-paths.js"
+import { getConfigFilePath, ensureConfigDir, getDataDir } from "./targets/xdg-paths.js"
 import { RootConfigSchema, expandEnvVars, expandTildeInObject } from "./targets/config-schema.js"
 
 /** 所有已知 provider 名称，用于 enabledProviders 默认值 */
@@ -138,7 +139,6 @@ function mergeCsvWithFileDefault(envValue: string | undefined, fileValue: string
 
 export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseConfig {
   const env = process.env
-  const pkgDir = new URL("..", import.meta.url).pathname
 
   // 确保 XDG 配置目录存在（0700）
   ensureConfigDir()
@@ -173,7 +173,7 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
     defaultRows: env.TERMINAL_USE_DEFAULT_ROWS !== undefined
       ? parseInt(env.TERMINAL_USE_DEFAULT_ROWS, 10)
       : local?.defaultRows ?? 30,
-    artifactDir: env.TERMINAL_USE_ARTIFACT_DIR ?? local?.artifactDir ?? `${pkgDir}/artifacts`,
+    artifactDir: env.TERMINAL_USE_ARTIFACT_DIR ?? local?.artifactDir ?? join(getDataDir(env), "artifacts"),
     largePasteLimit: env.TERMINAL_USE_LARGE_PASTE_LIMIT !== undefined
       ? parseInt(env.TERMINAL_USE_LARGE_PASTE_LIMIT, 10)
       : 2000,

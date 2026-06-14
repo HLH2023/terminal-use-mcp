@@ -42,7 +42,7 @@ const DEFAULT_DENIED_COMMANDS = [
   "del", "erase", "rmdir", "rd", "format", "diskpart",
   "reg", "reg.exe", "takeown", "icacls", "net", "net.exe",
   "netsh", "netsh.exe", "sc", "sc.exe", "taskkill", "taskkill.exe",
-]
+].map((command) => command.toLowerCase())
 
 const DEFAULT_DENIED_CWD_ROOTS = process.platform === "win32"
   ? ["C:\\", "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData"]
@@ -315,7 +315,7 @@ export function extractBaseCommandArgv(argv: string[]): string {
 
   while (tokens.length > 0) {
     const wrapper = tokens[0] ?? ""
-    const wrapperBase = basenameCrossPlatform(wrapper)
+    const wrapperBase = basenameCrossPlatform(wrapper).toLowerCase()
     if (!KNOWN_WRAPPERS.includes(wrapperBase)) {
       break
     }
@@ -455,21 +455,23 @@ export function isCommandSafeArgv(
     baseCommand = extractBaseCommandArgv([command, ...args])
   }
 
-  const mergedDenied = [...DEFAULT_DENIED_COMMANDS, ...deniedCommands]
+  const normalizedBase = baseCommand.toLowerCase()
+  const allowedSet = buildAllowedSet(allowedCommands)
+  const deniedSet = buildDeniedSet(deniedCommands)
 
   // 允许列表覆盖拒绝列表
-  if (allowedCommands.includes(baseCommand)) {
+  if (allowedSet.has(normalizedBase)) {
     return { ok: true }
   }
 
-  if (mergedDenied.includes(baseCommand)) {
+  if (deniedSet.has(normalizedBase)) {
     if (riskyMode === "ask") {
-      return { ok: false, reason: `Command "${baseCommand}" requires user confirmation`, code: "CONFIRMATION_REQUIRED" }
+      return { ok: false, reason: `Command "${normalizedBase}" requires user confirmation`, code: "CONFIRMATION_REQUIRED" }
     }
     if (riskyMode === "allow") {
       return { ok: true }
     }
-    return { ok: false, reason: `Command "${baseCommand}" is blocked by safety policy`, code: "UNSAFE_COMMAND" }
+    return { ok: false, reason: `Command "${normalizedBase}" is blocked by safety policy`, code: "UNSAFE_COMMAND" }
   }
 
   return { ok: true }
@@ -490,24 +492,34 @@ export function isCommandSafe(
 ): CommandSafetyResult {
   // 旧版走 extractBaseCommand（字符串 → token → 剥除 wrapper）
   const baseCommand = extractBaseCommand(command)
-  const mergedDenied = [...DEFAULT_DENIED_COMMANDS, ...deniedCommands]
+  const normalizedBase = baseCommand.toLowerCase()
+  const allowedSet = buildAllowedSet(allowedCommands)
+  const deniedSet = buildDeniedSet(deniedCommands)
 
   // 允许列表覆盖拒绝列表
-  if (allowedCommands.includes(baseCommand)) {
+  if (allowedSet.has(normalizedBase)) {
     return { ok: true }
   }
 
-  if (mergedDenied.includes(baseCommand)) {
+  if (deniedSet.has(normalizedBase)) {
     if (riskyMode === "ask") {
-      return { ok: false, reason: `Command "${baseCommand}" requires user confirmation`, code: "CONFIRMATION_REQUIRED" }
+      return { ok: false, reason: `Command "${normalizedBase}" requires user confirmation`, code: "CONFIRMATION_REQUIRED" }
     }
     if (riskyMode === "allow") {
       return { ok: true }
     }
-    return { ok: false, reason: `Command "${baseCommand}" is blocked by safety policy`, code: "UNSAFE_COMMAND" }
+    return { ok: false, reason: `Command "${normalizedBase}" is blocked by safety policy`, code: "UNSAFE_COMMAND" }
   }
 
   return { ok: true }
+}
+
+function buildAllowedSet(allowedCommands: string[]): Set<string> {
+  return new Set(allowedCommands.map((command) => command.toLowerCase()))
+}
+
+function buildDeniedSet(deniedCommands: string[]): Set<string> {
+  return new Set([...DEFAULT_DENIED_COMMANDS, ...deniedCommands].map((command) => command.toLowerCase()))
 }
 
 // ============================================================

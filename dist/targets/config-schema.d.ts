@@ -122,6 +122,7 @@ export declare const SshProfileOverlaySchema: z.ZodEffects<z.ZodObject<{
     }>>;
     knownHosts: z.ZodOptional<z.ZodString>;
     pinnedHostFingerprint: z.ZodOptional<z.ZodString>;
+    proxyJump: z.ZodOptional<z.ZodString>;
     defaultCwd: z.ZodOptional<z.ZodString>;
     /** 远程允许的工作目录范围（必须非空） */
     remoteAllowedCwd: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
@@ -150,6 +151,7 @@ export declare const SshProfileOverlaySchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -172,6 +174,7 @@ export declare const SshProfileOverlaySchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -194,6 +197,7 @@ export declare const SshProfileOverlaySchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -216,6 +220,7 @@ export declare const SshProfileOverlaySchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -277,6 +282,7 @@ export declare const SshHostProfileSchema: z.ZodEffects<z.ZodObject<{
     }>;
     knownHosts: z.ZodOptional<z.ZodString>;
     pinnedHostFingerprint: z.ZodOptional<z.ZodString>;
+    proxyJump: z.ZodOptional<z.ZodString>;
     defaultCwd: z.ZodOptional<z.ZodString>;
     /** 远程允许的工作目录范围（必须非空） */
     remoteAllowedCwd: z.ZodArray<z.ZodString, "many">;
@@ -303,6 +309,7 @@ export declare const SshHostProfileSchema: z.ZodEffects<z.ZodObject<{
     sshConfigHost?: string | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteDeniedCwd?: string[] | undefined;
     allowTmux?: boolean | undefined;
@@ -326,6 +333,7 @@ export declare const SshHostProfileSchema: z.ZodEffects<z.ZodObject<{
     sshConfigHost?: string | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteDeniedCwd?: string[] | undefined;
     allowTmux?: boolean | undefined;
@@ -349,6 +357,7 @@ export declare const SshHostProfileSchema: z.ZodEffects<z.ZodObject<{
     sshConfigHost?: string | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteDeniedCwd?: string[] | undefined;
     allowTmux?: boolean | undefined;
@@ -372,6 +381,7 @@ export declare const SshHostProfileSchema: z.ZodEffects<z.ZodObject<{
     sshConfigHost?: string | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteDeniedCwd?: string[] | undefined;
     allowTmux?: boolean | undefined;
@@ -430,6 +440,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         }>;
         knownHosts: z.ZodOptional<z.ZodString>;
         pinnedHostFingerprint: z.ZodOptional<z.ZodString>;
+        proxyJump: z.ZodOptional<z.ZodString>;
         defaultCwd: z.ZodOptional<z.ZodString>;
         /** 远程允许的工作目录范围（必须非空） */
         remoteAllowedCwd: z.ZodArray<z.ZodString, "many">;
@@ -456,6 +467,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         sshConfigHost?: string | undefined;
         knownHosts?: string | undefined;
         pinnedHostFingerprint?: string | undefined;
+        proxyJump?: string | undefined;
         defaultCwd?: string | undefined;
         remoteDeniedCwd?: string[] | undefined;
         allowTmux?: boolean | undefined;
@@ -479,6 +491,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         sshConfigHost?: string | undefined;
         knownHosts?: string | undefined;
         pinnedHostFingerprint?: string | undefined;
+        proxyJump?: string | undefined;
         defaultCwd?: string | undefined;
         remoteDeniedCwd?: string[] | undefined;
         allowTmux?: boolean | undefined;
@@ -502,6 +515,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         sshConfigHost?: string | undefined;
         knownHosts?: string | undefined;
         pinnedHostFingerprint?: string | undefined;
+        proxyJump?: string | undefined;
         defaultCwd?: string | undefined;
         remoteDeniedCwd?: string[] | undefined;
         allowTmux?: boolean | undefined;
@@ -525,6 +539,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         sshConfigHost?: string | undefined;
         knownHosts?: string | undefined;
         pinnedHostFingerprint?: string | undefined;
+        proxyJump?: string | undefined;
         defaultCwd?: string | undefined;
         remoteDeniedCwd?: string[] | undefined;
         allowTmux?: boolean | undefined;
@@ -550,6 +565,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         sshConfigHost?: string | undefined;
         knownHosts?: string | undefined;
         pinnedHostFingerprint?: string | undefined;
+        proxyJump?: string | undefined;
         defaultCwd?: string | undefined;
         remoteDeniedCwd?: string[] | undefined;
         allowTmux?: boolean | undefined;
@@ -575,6 +591,7 @@ export declare const SshHostsConfigSchema: z.ZodObject<{
         sshConfigHost?: string | undefined;
         knownHosts?: string | undefined;
         pinnedHostFingerprint?: string | undefined;
+        proxyJump?: string | undefined;
         defaultCwd?: string | undefined;
         remoteDeniedCwd?: string[] | undefined;
         allowTmux?: boolean | undefined;
@@ -857,6 +874,7 @@ export declare const ProfileOverlayFileSchema: z.ZodEffects<z.ZodObject<{
     }>>;
     knownHosts: z.ZodOptional<z.ZodString>;
     pinnedHostFingerprint: z.ZodOptional<z.ZodString>;
+    proxyJump: z.ZodOptional<z.ZodString>;
     defaultCwd: z.ZodOptional<z.ZodString>;
     /** 远程允许的工作目录范围（必须非空） */
     remoteAllowedCwd: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
@@ -885,6 +903,7 @@ export declare const ProfileOverlayFileSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -907,6 +926,7 @@ export declare const ProfileOverlayFileSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -929,6 +949,7 @@ export declare const ProfileOverlayFileSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;
@@ -951,6 +972,7 @@ export declare const ProfileOverlayFileSchema: z.ZodEffects<z.ZodObject<{
     } | undefined;
     knownHosts?: string | undefined;
     pinnedHostFingerprint?: string | undefined;
+    proxyJump?: string | undefined;
     defaultCwd?: string | undefined;
     remoteAllowedCwd?: string[] | undefined;
     remoteDeniedCwd?: string[] | undefined;

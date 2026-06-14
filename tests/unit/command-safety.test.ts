@@ -408,6 +408,17 @@ describe("isCommandSafeArgv (H2 完整 argv 检查)", () => {
 })
 
 describe("isCommandSafeArgv - Windows denylist", () => {
+  it("大小写不敏感地拦截 Windows 高危命令", () => {
+    expect(isCommandSafeArgv("CMD.EXE", []).ok).toBe(false)
+    expect(isCommandSafeArgv("PowerShell.exe", []).ok).toBe(false)
+    expect(isCommandSafeArgv("TASKKILL.EXE", []).ok).toBe(false)
+  })
+
+  it("大小写不敏感地应用 allow/deny 覆盖", () => {
+    expect(isCommandSafeArgv("PowerShell.exe", [], ["POWERSHELL.EXE"]).ok).toBe(true)
+    expect(isCommandSafeArgv("MyTool.EXE", [], [], ["mytool.exe"]).ok).toBe(false)
+  })
+
   it("blocks powershell.exe", () => {
     expect(isCommandSafeArgv("powershell.exe", [])).toEqual({
       ok: false,
@@ -430,6 +441,27 @@ describe("isCommandSafeArgv - Windows denylist", () => {
       reason: expect.stringContaining("diskpart"),
       code: "UNSAFE_COMMAND",
     })
+  })
+})
+
+describe("isCommandSafeArgv - Windows denylist case-insensitive", () => {
+  it("blocks CMD.EXE (uppercase)", () => {
+    expect(isCommandSafeArgv("CMD.EXE", [])).toEqual({ ok: false, reason: expect.any(String), code: "UNSAFE_COMMAND" })
+  })
+  it("blocks PowerShell.EXE (mixed case)", () => {
+    expect(isCommandSafeArgv("PowerShell.EXE", [])).toEqual({ ok: false, reason: expect.any(String), code: "UNSAFE_COMMAND" })
+  })
+  it("blocks TaskKill.exe (mixed case)", () => {
+    expect(isCommandSafeArgv("TaskKill.exe", [])).toEqual({ ok: false, reason: expect.any(String), code: "UNSAFE_COMMAND" })
+  })
+  it("blocks lowercase powershell", () => {
+    expect(isCommandSafeArgv("powershell", [])).toEqual({ ok: false, reason: expect.any(String), code: "UNSAFE_COMMAND" })
+  })
+  it("blocks lowercase cmd", () => {
+    expect(isCommandSafeArgv("cmd", [])).toEqual({ ok: false, reason: expect.any(String), code: "UNSAFE_COMMAND" })
+  })
+  it("blocks lowercase taskkill", () => {
+    expect(isCommandSafeArgv("taskkill", [])).toEqual({ ok: false, reason: expect.any(String), code: "UNSAFE_COMMAND" })
   })
 })
 

@@ -205,10 +205,10 @@ export class SshTmuxProvider implements TerminalProvider {
     const mergedEnv = mergeRemoteEnv(target.env, input.env)
     const xtermAdapter = new XtermAdapter(input.cols, input.rows)
     const loginInteractiveCommand = buildLoginInteractiveShellCommand(input.command, input.args, caps)
+    const envArgs = buildTmuxEnvironmentArgs(mergedEnv)
 
     let started = false
     try {
-      await this.applyEnvironment(target, tmuxPath, mergedEnv)
       await this.execRemoteTmux(target, tmuxPath, [
         "new-session",
         "-d",
@@ -220,6 +220,7 @@ export class SshTmuxProvider implements TerminalProvider {
         input.rows.toString(),
         "-c",
         remoteCwd,
+        ...envArgs,
         "--",
         loginInteractiveCommand,
       ], "start", sessionId)
@@ -228,7 +229,6 @@ export class SshTmuxProvider implements TerminalProvider {
       await this.execRemoteTmux(target, tmuxPath, ["set-option", "-t", tmuxId, "mouse", "on"], "set-mouse-on", sessionId)
       started = true
     } finally {
-      await this.clearEnvironment(target, tmuxPath, mergedEnv)
       if (!started) {
         // 远程 start 任一步骤失败时 session 尚未登记；本地 adapter 必须同步释放。
         xtermAdapter.dispose()
@@ -754,27 +754,6 @@ export class SshTmuxProvider implements TerminalProvider {
     })
   }
 
-  private async applyEnvironment(target: ResolvedSshTarget, tmuxPath: string, env: Record<string, string> | undefined): Promise<void> {
-    if (env === undefined) return
-    for (const [key, value] of Object.entries(env)) {
-      await this.execRemoteTmux(target, tmuxPath, ["set-environment", "-g", key, value], "set-environment")
-    }
-  }
-
-  private async clearEnvironment(target: ResolvedSshTarget, tmuxPath: string, env: Record<string, string> | undefined): Promise<void> {
-    if (env === undefined) return
-    for (const key of Object.keys(env)) {
-      const result = await this.commandExecutor(target, [tmuxPath, "set-environment", "-gu", key], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS })
-      if (result.exitCode !== 0) {
-        this.logger.warn("ssh-tmux environment cleanup failed", {
-          profile: target.profile ?? target.name,
-          key,
-          stderr: result.stderr,
-        })
-      }
-    }
-  }
-
   private assertSessionExists(sessionId: string): SshTmuxSession {
     const tracked = this.sessions.get(sessionId)
     if (tracked === undefined) throw new SessionNotFoundError(sessionId)
@@ -886,9 +865,13 @@ function parsePositiveInteger(value: string): number | undefined {
 
 function buildLoginInteractiveShellCommand(command: string, args: string[], capabilities: Pick<RemoteCapabilities, "os" | "shell">): string {
   if (isWindowsRemoteOs(capabilities.os)) {
-    return `${capabilities.shell} /c ${windowsCmdQuote([command, ...args].map(windowsCmdQuote).join(" "))}`
+    return `${quoteWindowsPath(capabilities.shell)} /c ${windowsCmdQuote([command, ...args].map(windowsCmdQuote).join(" "))}`
   }
   return `exec ${shellQuote(capabilities.shell)} -l -ic ${shellQuote(buildShellExecCommand(command, args))}`
+}
+
+function quoteWindowsPath(path: string): string {
+  return path.includes(" ") ? `"${path}"` : path
 }
 
 function buildShellExecCommand(command: string, args: string[]): string {
@@ -915,6 +898,11 @@ function parseTmuxListEntry(line: string): SshTmuxListEntry {
 function mergeRemoteEnv(profileEnv: Record<string, string> | undefined, inputEnv: Record<string, string> | undefined): Record<string, string> | undefined {
   if (profileEnv === undefined && inputEnv === undefined) return undefined
   return { ...(profileEnv ?? {}), ...(inputEnv ?? {}) }
+}
+
+function buildTmuxEnvironmentArgs(env: Record<string, string> | undefined): string[] {
+  if (env === undefined) return []
+  return Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`])
 }
 
 function targetKey(target: ResolvedSshTarget): string {
@@ -947,13 +935,13 @@ function ensureRemoteTmuxUsable(provider: ProviderName, target: ResolvedSshTarge
       details: { profile: profileName, capabilities },
     })
   }
-  if (capabilities.tmuxVersion !== null && !isSupportedTmuxVersion(capabilities.tmuxVersion)) {
+  if (capabilities.tmuxVersion === null || !isSupportedTmuxVersion(capabilities.tmuxVersion)) {
     throw new TerminalUseError({
       code: "REMOTE_TMUX_NOT_AVAILABLE",
-      message: `Remote tmux version ${capabilities.tmuxVersion} on ${profileName} is too old; require tmux >= 3.2`,
+      message: `Remote tmux version ${capabilities.tmuxVersion ?? "unknown"} on ${profileName} is not supported; require parseable tmux >= 3.2`,
       provider,
       retryable: false,
-      hint: "Upgrade tmux on the remote host to 3.2 or newer",
+      hint: "Upgrade tmux on the remote host to 3.2 or newer and ensure tmux -V returns a parseable version",
       details: { profile: profileName, required: "3.2", actual: capabilities.tmuxVersion, capabilities },
     })
   }
@@ -962,10 +950,10 @@ function ensureRemoteTmuxUsable(provider: ProviderName, target: ResolvedSshTarge
 
 function isSupportedTmuxVersion(version: string): boolean {
   const parsed = /^tmux\s+(\d+)\.(\d+)/u.exec(version)
-  if (parsed === null) return true
+  if (parsed === null) return false
   const major = Number(parsed[1])
   const minor = Number(parsed[2])
-  if (!Number.isInteger(major) || !Number.isInteger(minor)) return true
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) return false
   return major > 3 || (major === 3 && minor >= 2)
 }
 

@@ -114,6 +114,8 @@ export class ProviderExecutor {
         const target = await this.resolveTmuxToolTarget(input);
         const providerName = target.kind === "local" ? "tmux" : "ssh-tmux";
         let exists = false;
+        let available = true;
+        let reason = null;
         let windows = null;
         let created = null;
         try {
@@ -125,8 +127,9 @@ export class ProviderExecutor {
                 created = found.created;
             }
         }
-        catch {
-            // list 失败不阻塞预览
+        catch (error) {
+            available = false;
+            reason = formatUnknownError(error);
         }
         const managedSessions = this.sm.listSessions().filter((session) => {
             return session.providerName === providerName && session.providerSessionId === tmuxName;
@@ -135,6 +138,8 @@ export class ProviderExecutor {
             name: tmuxName,
             target: this.summarizeTmuxTarget(target),
             exists,
+            available,
+            reason,
             isManaged: managedSessions.length > 0,
             managedSessionIds: managedSessions.map((s) => s.sessionId),
             windows,

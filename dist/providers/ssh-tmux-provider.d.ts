@@ -70,8 +70,6 @@ export declare class SshTmuxProvider implements TerminalProvider {
     private discoverCapabilities;
     private execRemoteTmux;
     private toRemoteTmuxError;
-    private applyEnvironment;
-    private clearEnvironment;
     private assertSessionExists;
     private getLiveSession;
     private findTrackedSession;

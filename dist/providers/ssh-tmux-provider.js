@@ -111,9 +111,9 @@ export class SshTmuxProvider {
         const mergedEnv = mergeRemoteEnv(target.env, input.env);
         const xtermAdapter = new XtermAdapter(input.cols, input.rows);
         const loginInteractiveCommand = buildLoginInteractiveShellCommand(input.command, input.args, caps);
+        const envArgs = buildTmuxEnvironmentArgs(mergedEnv);
         let started = false;
         try {
-            await this.applyEnvironment(target, tmuxPath, mergedEnv);
             await this.execRemoteTmux(target, tmuxPath, [
                 "new-session",
                 "-d",
@@ -125,6 +125,7 @@ export class SshTmuxProvider {
                 input.rows.toString(),
                 "-c",
                 remoteCwd,
+                ...envArgs,
                 "--",
                 loginInteractiveCommand,
             ], "start", sessionId);
@@ -134,7 +135,6 @@ export class SshTmuxProvider {
             started = true;
         }
         finally {
-            await this.clearEnvironment(target, tmuxPath, mergedEnv);
             if (!started) {
                 // 远程 start 任一步骤失败时 session 尚未登记；本地 adapter 必须同步释放。
                 xtermAdapter.dispose();
@@ -593,27 +593,6 @@ export class SshTmuxProvider {
             details: { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout },
         });
     }
-    async applyEnvironment(target, tmuxPath, env) {
-        if (env === undefined)
-            return;
-        for (const [key, value] of Object.entries(env)) {
-            await this.execRemoteTmux(target, tmuxPath, ["set-environment", "-g", key, value], "set-environment");
-        }
-    }
-    async clearEnvironment(target, tmuxPath, env) {
-        if (env === undefined)
-            return;
-        for (const key of Object.keys(env)) {
-            const result = await this.commandExecutor(target, [tmuxPath, "set-environment", "-gu", key], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS });
-            if (result.exitCode !== 0) {
-                this.logger.warn("ssh-tmux environment cleanup failed", {
-                    profile: target.profile ?? target.name,
-                    key,
-                    stderr: result.stderr,
-                });
-            }
-        }
-    }
     assertSessionExists(sessionId) {
         const tracked = this.sessions.get(sessionId);
         if (tracked === undefined)
@@ -715,9 +694,12 @@ function parsePositiveInteger(value) {
 }
 function buildLoginInteractiveShellCommand(command, args, capabilities) {
     if (isWindowsRemoteOs(capabilities.os)) {
-        return `${capabilities.shell} /c ${windowsCmdQuote([command, ...args].map(windowsCmdQuote).join(" "))}`;
+        return `${quoteWindowsPath(capabilities.shell)} /c ${windowsCmdQuote([command, ...args].map(windowsCmdQuote).join(" "))}`;
     }
     return `exec ${shellQuote(capabilities.shell)} -l -ic ${shellQuote(buildShellExecCommand(command, args))}`;
+}
+function quoteWindowsPath(path) {
+    return path.includes(" ") ? `"${path}"` : path;
 }
 function buildShellExecCommand(command, args) {
     return `exec ${[command, ...args].map(shellQuote).join(" ")}`;
@@ -741,6 +723,11 @@ function mergeRemoteEnv(profileEnv, inputEnv) {
     if (profileEnv === undefined && inputEnv === undefined)
         return undefined;
     return { ...(profileEnv ?? {}), ...(inputEnv ?? {}) };
+}
+function buildTmuxEnvironmentArgs(env) {
+    if (env === undefined)
+        return [];
+    return Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
 }
 function targetKey(target) {
     return target.profile ?? target.name;
@@ -770,13 +757,13 @@ function ensureRemoteTmuxUsable(provider, target, capabilities) {
             details: { profile: profileName, capabilities },
         });
     }
-    if (capabilities.tmuxVersion !== null && !isSupportedTmuxVersion(capabilities.tmuxVersion)) {
+    if (capabilities.tmuxVersion === null || !isSupportedTmuxVersion(capabilities.tmuxVersion)) {
         throw new TerminalUseError({
             code: "REMOTE_TMUX_NOT_AVAILABLE",
-            message: `Remote tmux version ${capabilities.tmuxVersion} on ${profileName} is too old; require tmux >= 3.2`,
+            message: `Remote tmux version ${capabilities.tmuxVersion ?? "unknown"} on ${profileName} is not supported; require parseable tmux >= 3.2`,
             provider,
             retryable: false,
-            hint: "Upgrade tmux on the remote host to 3.2 or newer",
+            hint: "Upgrade tmux on the remote host to 3.2 or newer and ensure tmux -V returns a parseable version",
             details: { profile: profileName, required: "3.2", actual: capabilities.tmuxVersion, capabilities },
         });
     }
@@ -785,11 +772,11 @@ function ensureRemoteTmuxUsable(provider, target, capabilities) {
 function isSupportedTmuxVersion(version) {
     const parsed = /^tmux\s+(\d+)\.(\d+)/u.exec(version);
     if (parsed === null)
-        return true;
+        return false;
     const major = Number(parsed[1]);
     const minor = Number(parsed[2]);
     if (!Number.isInteger(major) || !Number.isInteger(minor))
-        return true;
+        return false;
     return major > 3 || (major === 3 && minor >= 2);
 }
 function isWindowsRemoteOs(os) {

@@ -12,7 +12,7 @@
  * 2. SSH_AUTH_SOCK 环境变量（MCP 客户端传入）
  * 3. XDG_RUNTIME_DIR/ssh-agent.socket（systemd user service）
  * 4. XDG_RUNTIME_DIR/keyring/ssh（GNOME Keyring）
- * 5. 运行时扫描 ss -xU（兜底，可选）
+ * 5. 运行时扫描 ss -x --no-header（兜底，可选）
  */
 import type { SshAuthRef } from "./target-types.js";
 /** 已解析的 SSH 认证配置 */
@@ -33,7 +33,7 @@ export declare function resolveSshAuth(auth: SshAuthRef): Promise<ResolvedSshAut
  * 1. SSH_AUTH_SOCK 环境变量（MCP 客户端传入）
  * 2. XDG_RUNTIME_DIR/ssh-agent.socket（systemd user service）
  * 3. XDG_RUNTIME_DIR/keyring/ssh（GNOME Keyring）
- * 4. 运行时扫描 ss -xU | grep agent（兜底）
+ * 4. 运行时扫描 ss -x --no-header（兜底）
  *
  * profile 中的 auth.socket 显式传参在 resolveSshAuth 中优先于本函数。
  * 本函数只处理"没有显式指定 socket"时的自动发现。

@@ -324,7 +324,7 @@ Constraints:
 
 ## Skills (Optional)
 
-terminal-use-mcp ships with a **core skill** (`terminal-use`) that teaches AI agents how to use the MCP tools correctly. Additionally, there are **agent-specific skills** for controlling external AI agent TUIs. Install only the ones you need.
+terminal-use-mcp provides a **core skill** (`terminal-use`, available in the [GitHub repository](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills)) that teaches AI agents how to use the MCP tools correctly. Additionally, there are **agent-specific skills** for controlling external AI agent TUIs. Skills are not included in the npm package — download them from GitHub. Install only the ones you need.
 
 | Skill | Target Agent | Required? | Install |
 |-------|-------------|-----------|---------|
@@ -388,7 +388,7 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_DEFAULT_PROVIDER` | Default provider (overrides auto-selection priority) | `native-pty` |
 | `TERMINAL_USE_TMUX_PATH` | Absolute or relative path to tmux binary (when not on PATH) | `tmux` |
 | `TERMINAL_USE_WORKSPACE_ROOT` | CWD policy root | current working directory |
-| `TERMINAL_USE_ALLOWED_CWD` | Allowed working directories (CSV) | Workspace root |
+| `TERMINAL_USE_ALLOWED_CWD` | Allowed working directories (CSV) | _(empty; workspace root is always allowed via TERMINAL_USE_WORKSPACE_ROOT)_ |
 | `TERMINAL_USE_ALLOW_COMMANDS` | Commands allowed even if on deny list (CSV, overrides deny) | _(empty)_ |
 | `TERMINAL_USE_DENY_COMMANDS` | Extra denied commands beyond built-in list (CSV) | _(empty)_ |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | How to handle denied commands: `deny`, `ask`, or `allow` | `deny` |
@@ -404,14 +404,14 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_LARGE_PASTE_LIMIT` | Paste size threshold requiring confirmation (characters) | `2000` |
 | `TERMINAL_USE_HARD_PASTE_LIMIT` | Hard paste size limit — pastes above this are always refused (characters) | `10000` |
 | `TERMINAL_USE_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` | `info` |
-| `TERMINAL_USE_HOSTS_CONFIG` | Path to SSH host profiles configuration file | `~/.config/terminal-use-mcp/hosts.json` |
+| `TERMINAL_USE_HOSTS_CONFIG` | Path to SSH host profiles configuration file | XDG config dir / hosts.json (profiles/*.json takes priority) |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | Set to `1` to allow inline SSH host specification in tool calls | _(not set — denied)_ |
 
 #### Path Overrides
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `TERMINAL_USE_ARTIFACT_DIR` | Override artifact/transcript output directory | `<package-dir>/artifacts` |
+| `TERMINAL_USE_ARTIFACT_DIR` | Override artifact/transcript output directory | `<data-dir>/artifacts` |
 | `TERMINAL_USE_CONFIG_DIR` | Override XDG config directory | See XDG/platform defaults below |
 | `TERMINAL_USE_CONFIG_FILE` | Override config.json file path | `<config-dir>/config.json` |
 | `TERMINAL_USE_DATA_DIR` | Override XDG data directory (artifact, session data) | See XDG/platform defaults below |
@@ -425,6 +425,7 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `XDG_RUNTIME_DIR` | XDG runtime directory (used for SSH agent socket discovery) | Linux |
 | `APPDATA` | Windows roaming app data — app appends `terminal-use-mcp/` | Windows |
 | `LOCALAPPDATA` | Windows local app data — app appends `terminal-use-mcp/` | Windows |
+| `ComSpec` | Windows command interpreter path (used by native-pty shell wrapping) | Windows |
 
 #### SSH Authentication
 

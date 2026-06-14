@@ -68,9 +68,9 @@ export class TmuxProvider {
         const now = new Date().toISOString();
         const ttlMs = input.ttlMs ?? DEFAULT_TTL_MS;
         const xtermAdapter = new XtermAdapter(input.cols, input.rows);
+        const envArgs = buildTmuxEnvironmentArgs(input.env);
         let started = false;
         try {
-            await this.applyEnvironment(input.env);
             await this.execTmux([
                 "new-session",
                 "-d",
@@ -82,6 +82,7 @@ export class TmuxProvider {
                 input.rows.toString(),
                 "-c",
                 input.cwd,
+                ...envArgs,
                 "--",
                 input.command,
                 ...input.args,
@@ -93,7 +94,6 @@ export class TmuxProvider {
             started = true;
         }
         finally {
-            await this.clearEnvironment(input.env);
             if (!started) {
                 // start 失败时不会进入 sessions map；这里释放提前创建的 adapter，避免 addon/事件句柄泄漏。
                 xtermAdapter.dispose();
@@ -489,25 +489,6 @@ export class TmuxProvider {
     createTmuxSessionName() {
         return `tumcp_${randomBytes(4).toString("hex")}`;
     }
-    async applyEnvironment(env) {
-        if (env === undefined)
-            return;
-        for (const [key, value] of Object.entries(env)) {
-            await this.execTmux(["set-environment", "-g", key, value]);
-        }
-    }
-    async clearEnvironment(env) {
-        if (env === undefined)
-            return;
-        for (const key of Object.keys(env)) {
-            try {
-                await this.execTmux(["set-environment", "-gu", key]);
-            }
-            catch (error) {
-                this.logger.warn("tmux environment cleanup failed", { key, error: this.errorMessage(error) });
-            }
-        }
-    }
     assertSessionExists(sessionId) {
         const tracked = this.sessions.get(sessionId);
         if (tracked === undefined)
@@ -597,15 +578,17 @@ export class TmuxProvider {
             setTimeout(resolve, ms);
         });
     }
-    errorMessage(error) {
-        return error instanceof Error ? error.message : String(error);
-    }
 }
 function parsePositiveInteger(value) {
     if (!/^\d+$/u.test(value))
         return undefined;
     const parsed = Number(value);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+function buildTmuxEnvironmentArgs(env) {
+    if (env === undefined)
+        return [];
+    return Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
 }
 function parseTmuxVersion(output) {
     const versionMatch = output.match(/tmux\s+(\d+)\.(\d+)/u);

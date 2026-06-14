@@ -1,7 +1,7 @@
 # terminal-use-mcp Design Guide：Remote Terminal Control over SSH
 
 > 2026-06-13
-> 状态: 指导文档 — 待实施
+> 状态: 实现已完成 — 指导文档
 
 ---
 
@@ -1096,53 +1096,16 @@ terminal.attach target.profile=<profile> tmuxSessionName=<session>
 terminal.snapshot
 ```
 
-## 17. 开发阶段建议
+## 17. 实现状态
 
-### Phase Remote-0：远程设计落文档
-
-* 更新 DEV-PLAN.md。
-* 更新 README。
-* 更新 SKILL.md。
-* 不写代码。
-
-### Phase Remote-1：Target schema + profile loader
-
-* TerminalTarget。
-* SshHostProfile。
-* hosts.json loader。
-* RemoteCwdPolicy。
-* tests。
-
-### Phase Remote-2：Host key + auth
-
-* known_hosts parser 或 pinned fingerprint。
-* ssh-agent auth。
-* key-file opt-in。
-* verify_target。
-* tests。
-
-### Phase Remote-3：ssh-pty Provider
-
-* ssh2 channel。
-* xterm adapter。
-* input/output。
-* resize。
-* kill。
-* transcript。
-* integration fixture。
-
-### Phase Remote-4：ssh-tmux Provider
-
-* remote tmux commands。
-* attach/list/snapshot/type/press/kill。
-* integration fixture。
-
-### Phase Remote-5：远程 examples + 联调证据
-
-* remote demos。
-* troubleshooting。
-* integration evidence。
-* self-critique。
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| Remote-0 | 远程设计落文档、更新 DEV-PLAN.md / README / SKILL.md | ✅ 已完成 |
+| Remote-1 | TerminalTarget、SshHostProfile、hosts.json loader、RemoteCwdPolicy、tests | ✅ 已完成 |
+| Remote-2 | known_hosts parser / pinned fingerprint、ssh-agent auth、key-file opt-in、verify_target、tests | ✅ 已完成 |
+| Remote-3 | ssh-pty Provider（ssh2 channel、xterm adapter、input/output、resize、kill、transcript、integration fixture） | ✅ 已完成 |
+| Remote-4 | ssh-tmux Provider（remote tmux commands、attach/list/snapshot/type/press/kill、integration fixture） | ✅ 已完成 |
+| Remote-5 | 远程 examples、联调证据、troubleshooting、self-critique | ✅ 已完成 |
 
 ## 18. 禁止事项
 

@@ -82,6 +82,8 @@ export type TmuxKillPreviewResult = {
     name: string;
     target: TmuxToolTargetSummary;
     exists: boolean;
+    available: boolean;
+    reason: string | null;
     isManaged: boolean;
     managedSessionIds: string[];
     windows: number | null;

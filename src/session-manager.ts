@@ -175,11 +175,11 @@ export class SessionManager {
   /**
    * LLM agent 可能在 sessionId 前拼接 provider name 前缀（如 "native_term_xxx"），
    * 或产生其他非标准变形。此方法先精确匹配，失败后依次尝试：
-   * 1. 剥离已知 provider 前缀（native_|sshpty_|tumcup_|tmux_）
+   * 1. 剥离已知 provider 前缀（native_|sshpty_|tumcp_|tmux_）
    * 2. 模糊后缀匹配：在所有活跃 session 中查找后缀一致的 key
    */
   static stripProviderPrefix(id: string): string {
-    return id.replace(/^(native_|sshpty_|tumcup_|tmux_)/, "")
+    return id.replace(/^(native_|sshpty_|tumcp_|tmux_)/, "")
   }
 
   /** 获取 session (不存在时抛 SessionNotFoundError) */

@@ -818,12 +818,17 @@ function isWindowsRemoteOs(os) {
     return /^(Windows|Windows_NT)/iu.test(os) || /(?:MINGW|MSYS|CYGWIN)/iu.test(os);
 }
 function buildWindowsRemoteExecCommand(command, args, cwd, shell) {
+    const quotedShell = quoteWindowsPath(shell);
     if (isPowerShell(shell)) {
         const commandLine = `Set-Location -LiteralPath ${powerShellSingleQuote(cwd)}; & ${[command, ...args].map(powerShellSingleQuote).join(" ")}`;
-        return `${shell} -NoProfile -Command ${windowsCmdQuote(commandLine)}`;
+        return `${quotedShell} -NoProfile -Command ${windowsCmdQuote(commandLine)}`;
     }
     const commandLine = `cd ${windowsCmdQuote(cwd)} && ${[command, ...args].map(windowsCmdQuote).join(" ")}`;
-    return `${shell} /c ${windowsCmdQuote(commandLine)}`;
+    return `${quotedShell} /c ${windowsCmdQuote(commandLine)}`;
+}
+/** Quote a Windows executable path when it contains spaces. */
+export function quoteWindowsPath(path) {
+    return path.includes(" ") ? `"${path}"` : path;
 }
 function isPowerShell(shell) {
     const winBase = path.win32.basename(shell).toLowerCase();

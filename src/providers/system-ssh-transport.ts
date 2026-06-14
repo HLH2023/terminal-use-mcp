@@ -28,6 +28,7 @@ export type SystemSshTarget = {
   host: string
   port: number
   username: string
+  proxyJump?: string
 }
 
 export type ExecSshCommandOptions = {
@@ -131,7 +132,13 @@ function toOpenSshTimeoutSeconds(timeoutMs: number): number {
 
 function buildBaseSshArgs(target: SystemSshTarget, options: ExecSshCommandOptions): string[] {
   const connectTimeoutSeconds = toOpenSshTimeoutSeconds(options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS)
-  const sshArgs: string[] = [
+  const sshArgs: string[] = []
+
+  if (options.keyFile !== undefined) {
+    sshArgs.push("-i", options.keyFile)
+  }
+
+  sshArgs.push(
     "-p",
     String(target.port),
     "-o",
@@ -140,13 +147,13 @@ function buildBaseSshArgs(target: SystemSshTarget, options: ExecSshCommandOption
     `ConnectTimeout=${connectTimeoutSeconds}`,
     "-o",
     "BatchMode=yes",
-    `${target.username}@${target.host}`,
-  ]
+  )
 
-  if (options.keyFile !== undefined) {
-    // 与 OpenSSH 惯例一致：-i 放在 host 前，且作为独立 argv 传入。
-    sshArgs.unshift("-i", options.keyFile)
+  if (target.proxyJump !== undefined && target.proxyJump.trim().length > 0) {
+    sshArgs.push("-o", `ProxyJump=${target.proxyJump.trim()}`)
   }
+
+  sshArgs.push(`${target.username}@${target.host}`)
 
   return sshArgs
 }

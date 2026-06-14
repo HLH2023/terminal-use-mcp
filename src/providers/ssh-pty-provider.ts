@@ -1046,13 +1046,19 @@ function isWindowsRemoteOs(os: string): boolean {
 }
 
 function buildWindowsRemoteExecCommand(command: string, args: string[], cwd: string, shell: string): string {
+  const quotedShell = quoteWindowsPath(shell)
   if (isPowerShell(shell)) {
     const commandLine = `Set-Location -LiteralPath ${powerShellSingleQuote(cwd)}; & ${[command, ...args].map(powerShellSingleQuote).join(" ")}`
-    return `${shell} -NoProfile -Command ${windowsCmdQuote(commandLine)}`
+    return `${quotedShell} -NoProfile -Command ${windowsCmdQuote(commandLine)}`
   }
 
   const commandLine = `cd ${windowsCmdQuote(cwd)} && ${[command, ...args].map(windowsCmdQuote).join(" ")}`
-  return `${shell} /c ${windowsCmdQuote(commandLine)}`
+  return `${quotedShell} /c ${windowsCmdQuote(commandLine)}`
+}
+
+/** Quote a Windows executable path when it contains spaces. */
+export function quoteWindowsPath(path: string): string {
+  return path.includes(" ") ? `"${path}"` : path
 }
 
 function isPowerShell(shell: string): boolean {

@@ -100,7 +100,7 @@ export function createMcpServer(
   )
 
   // ── Session lifecycle (7) ──
-  registerStartTool(server, sm, logger)
+  registerStartTool(server, sm, logger, config)
   registerAttachTool(server, sm, logger)
   registerListTool(server, sm, logger)
   registerInfoTool(server, sm, logger)
@@ -116,7 +116,7 @@ export function createMcpServer(
   registerScrollTool(server, executor, logger)
   registerTypeTool(server, executor, logger)
   registerPressTool(server, executor, logger)
-  registerPasteTool(server, executor, logger)
+  registerPasteTool(server, executor, logger, config)
   registerMouseClickTool(server, executor, logger)
   registerMouseScrollTool(server, executor, logger)
 

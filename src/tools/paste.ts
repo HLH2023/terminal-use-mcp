@@ -4,13 +4,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 
 import type { Logger } from "../logger.js"
+import type { TerminalUseConfig } from "../config.js"
 import { getDetectedSecretTypes } from "../terminal/redact.js"
 import { LargePasteRefusedError, SecretDetectedError } from "../terminal/errors.js"
 import type { ProviderExecutor } from "./tool-helpers.js"
 import { errorToToolResult, okToolResult } from "./tool-helpers.js"
 
-const SOFT_PASTE_LIMIT = 2_000
-const HARD_PASTE_LIMIT = 10_000
 const PASTE_MODES = ["bracketed", "line-by-line", "raw"] as const
 
 type PasteMode = typeof PASTE_MODES[number]
@@ -21,7 +20,7 @@ type PasteToolOutput = {
   warning?: string
 }
 
-export function registerPasteTool(server: McpServer, executor: ProviderExecutor, logger: Logger): void {
+export function registerPasteTool(server: McpServer, executor: ProviderExecutor, logger: Logger, config: TerminalUseConfig): void {
   server.registerTool(
     "terminal.paste",
     {
@@ -29,7 +28,7 @@ export function registerPasteTool(server: McpServer, executor: ProviderExecutor,
       inputSchema: {
         sessionId: z.string().min(1).describe("Session ID from terminal.start — use exact value"),
         text: z.string().describe("Text to paste into the terminal"),
-        confirmLargePaste: z.boolean().optional().describe("Required when text length is greater than 2000 characters"),
+        confirmLargePaste: z.boolean().optional().describe(`Required when text length is greater than ${config.largePasteLimit} characters`),
         mode: z.enum(PASTE_MODES).optional().describe("Paste mode: bracketed, line-by-line, or raw"),
       },
     },
@@ -39,16 +38,16 @@ export function registerPasteTool(server: McpServer, executor: ProviderExecutor,
         if (secretTypes.length > 0) {
           throw new SecretDetectedError(secretTypes)
         }
-        if (input.text.length > HARD_PASTE_LIMIT) {
-          throw new LargePasteRefusedError(input.text.length, HARD_PASTE_LIMIT, true)
+        if (input.text.length > config.hardPasteLimit) {
+          throw new LargePasteRefusedError(input.text.length, config.hardPasteLimit, true)
         }
-        if (input.text.length > SOFT_PASTE_LIMIT && input.confirmLargePaste !== true) {
-          throw new LargePasteRefusedError(input.text.length, SOFT_PASTE_LIMIT, false)
+        if (input.text.length > config.largePasteLimit && input.confirmLargePaste !== true) {
+          throw new LargePasteRefusedError(input.text.length, config.largePasteLimit, false)
         }
 
         const mode = input.mode ?? "bracketed"
         await executor.executePaste(input.sessionId, input.text, mode)
-        const warning = input.text.length > SOFT_PASTE_LIMIT
+        const warning = input.text.length > config.largePasteLimit
           ? `Large paste confirmed (${input.text.length} characters). Terminal output remains untrusted.`
           : undefined
         const output: PasteToolOutput = { ok: true, mode, warning }

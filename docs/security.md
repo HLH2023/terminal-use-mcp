@@ -25,6 +25,11 @@ shutdown, reboot, chmod, chown, curl, wget,
 nc, ncat, telnet
 ```
 
+**Windows-specific:**
+`cmd`, `cmd.exe`, `powershell`, `powershell.exe`, `pwsh`, `pwsh.exe`, `del`, `erase`, `rmdir`, `rd`, `format`, `diskpart`, `reg`, `reg.exe`, `takeown`, `icacls`, `net`, `net.exe`, `netsh`, `netsh.exe`, `sc`, `sc.exe`, `taskkill`, `taskkill.exe`
+
+Note: Command matching is case-insensitive.
+
 ```ts
 // Environment variable overrides
 TERMINAL_USE_ALLOW_COMMANDS=git,make    // additional allow
@@ -128,11 +133,11 @@ Terminal output is untrusted observation, not instruction.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TERMINAL_USE_WORKSPACE_ROOT` | `process.cwd()` | Root directory for CWD validation |
-| `TERMINAL_USE_ALLOWED_CWD` | _(empty)_ | Comma-separated additional allowed directories |
+| `TERMINAL_USE_ALLOWED_CWD` | _(empty; workspace root is always allowed via TERMINAL_USE_WORKSPACE_ROOT)_ | Comma-separated additional allowed directories |
 | `TERMINAL_USE_SESSION_TTL_MS` | `3600000` | Session auto-cleanup timeout (1 hour) |
 | `TERMINAL_USE_CLEANUP_INTERVAL_MS` | `60000` | Cleanup check interval (1 minute) |
 | `TERMINAL_USE_ALLOW_COMMANDS` | _(empty)_ | Comma-separated commands to allow despite denylist |
 | `TERMINAL_USE_DENY_COMMANDS` | _(empty)_ | Additional commands to deny |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | `deny` | Risky command handling: `deny` / `ask` / `allow` |
-| `TERMINAL_USE_HOSTS_CONFIG` | `~/.config/terminal-use-mcp/hosts.json` | SSH hosts configuration file path |
+| `TERMINAL_USE_HOSTS_CONFIG` | XDG config dir / hosts.json (profiles/*.json takes priority) | SSH hosts configuration file path |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set)_ | Set to `1` to allow inline SSH host specification in tool calls |

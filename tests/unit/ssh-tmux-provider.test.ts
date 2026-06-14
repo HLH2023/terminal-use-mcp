@@ -120,6 +120,16 @@ describe("system ssh transport", () => {
     expect(args.indexOf("tester@example.test")).toBeGreaterThan(args.indexOf("-i"))
   })
 
+  it("ProxyJump 作为 SSH option 放在 host 参数之前", () => {
+    const args = buildSshCommandArgs(
+      { host: "example.test", port: 22, username: "tester", proxyJump: "bastion" },
+      ["tmux", "-V"],
+    )
+
+    expect(args).toContain("ProxyJump=bastion")
+    expect(args.indexOf("tester@example.test")).toBeGreaterThan(args.indexOf("ProxyJump=bastion"))
+  })
+
   it("远端 argv 会按 POSIX shell token 规则转义", () => {
     expect(quoteRemoteArg("simple-OK_1")).toBe("simple-OK_1")
     expect(quoteRemoteArg("a b;c$(rm)")).toBe("'a b;c$(rm)'")
@@ -190,6 +200,20 @@ describe("SshTmuxProvider", () => {
     expect(startCall?.at(-1)).toContain("app.js")
   })
 
+  it("Windows shell 路径含空格时 start command 引用 shell executable", async () => {
+    const shell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+    const { provider, calls } = createProviderWithExecutor(undefined, {
+      ...DEFAULT_REMOTE_CAPS,
+      os: "Windows",
+      shell,
+    })
+
+    await provider.start(createStartInput({ command: "node", args: ["app.js"], cwd: "/home/tester/project" }))
+
+    const startCall = calls.find((call) => call[1] === "new-session")
+    expect(startCall?.at(-1)).toContain(`"${shell}" /c`)
+  })
+
   it("RemoteCwdPolicy 拒绝远程 denied cwd", async () => {
     const { provider } = createProviderWithExecutor()
     await expect(provider.start(createStartInput({ cwd: "/etc" }))).rejects.toThrow(RemoteCwdDeniedError)
@@ -222,7 +246,26 @@ describe("SshTmuxProvider", () => {
   it("remote tmux 低于 3.2 时 start 失败关闭", async () => {
     const { provider } = createProviderWithExecutor(undefined, { ...DEFAULT_REMOTE_CAPS, tmuxVersion: "tmux 3.1c" })
 
-    await expect(provider.start(createStartInput())).rejects.toThrow(/too old/u)
+    await expect(provider.start(createStartInput())).rejects.toThrow(/not supported/u)
+  })
+
+  it("remote tmux version 不可解析时 start 失败关闭", async () => {
+    const { provider } = createProviderWithExecutor(undefined, { ...DEFAULT_REMOTE_CAPS, tmuxVersion: null })
+
+    await expect(provider.start(createStartInput())).rejects.toThrow(/unknown/u)
+  })
+
+  it("rejects remote tmux when version is unparseable despite tmuxPath present", async () => {
+    const caps: RemoteCapabilities = {
+      os: "Linux",
+      shell: "/bin/bash",
+      tmuxPath: "/usr/bin/tmux",
+      tmuxVersion: null,
+      home: "/home/user",
+    }
+    const { provider } = createProviderWithExecutor(undefined, caps)
+
+    await expect(provider.start(createStartInput())).rejects.toThrow(/unknown/u)
   })
 
   it("parse tmux list-sessions 输出为结构化列表", () => {

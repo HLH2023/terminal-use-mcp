@@ -242,8 +242,8 @@ it cannot connect to the terminal-use server.
 3. **Missing dependencies** — run `npm install` in the terminal-use-mcp
    directory first.
 
-4. **TERMINAL_USE_WORKSPACE_ROOT not set** — this is required. Without it,
-   the safety layer has no default cwd root and will reject all sessions.
+4. **TERMINAL_USE_WORKSPACE_ROOT not set** — this is recommended. Without it,
+   the safety layer defaults to `process.cwd()` as the cwd root and will reject sessions outside that path.
 
 **Diagnostic steps**:
 

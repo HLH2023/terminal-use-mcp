@@ -16,7 +16,7 @@ import type { Logger } from "../../src/logger.js"
 let tempWorkspaceDir: string
 
 function createMockConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseConfig {
-  return {
+  const baseConfig: TerminalUseConfig = {
     workspaceRoot: tempWorkspaceDir,
     allowedCwdRoots: [],
     allowedCommands: [],
@@ -33,8 +33,15 @@ function createMockConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseCo
     logLevel: "warn",
     hostsConfigPath: undefined,
     allowInlineSshTargets: false,
-    ...overrides,
+    sshDefaults: {
+      remoteDeniedCwd: ["/", "/root", "/etc", "/boot", "/proc", "/sys"],
+      allowTmux: true,
+      connectTimeoutMs: 10_000,
+      keepaliveIntervalMs: 15_000,
+    },
+    enabledProviders: ["native-pty", "tmux", "ssh-pty", "ssh-tmux"],
   }
+  return { ...baseConfig, ...overrides }
 }
 
 function createMockLogger(): Logger {
@@ -64,6 +71,8 @@ function createMockCapabilities(): ProviderCapabilities {
     supportsRename: false,
     supportsScroll: false,
     supportsFind: false,
+    supportsMouseClick: false,
+    supportsMouseScroll: false,
   }
 }
 
@@ -86,8 +95,12 @@ function createMockProviderSession(overrides?: Partial<TerminalSession>): Termin
   }
 }
 
-function createMockProvider(overrides?: Partial<TerminalProvider>): TerminalProvider {
-  return {
+function createMockProvider(overrides?: Partial<TerminalProvider> | ProviderName): TerminalProvider {
+  const normalizedOverrides: Partial<TerminalProvider> | undefined = typeof overrides === "string"
+    ? { name: overrides, capabilities: { ...createMockCapabilities(), provider: overrides } }
+    : overrides
+
+  const provider: TerminalProvider = {
     name: "native-pty" as ProviderName,
     capabilities: createMockCapabilities(),
     isAvailable: vi.fn().mockResolvedValue(true),
@@ -100,8 +113,10 @@ function createMockProvider(overrides?: Partial<TerminalProvider>): TerminalProv
     paste: vi.fn(),
     kill: vi.fn().mockResolvedValue(undefined),
     exportTranscript: vi.fn(),
-    ...overrides,
+    hasSession: vi.fn().mockReturnValue(false),
+    listActiveSessionIds: vi.fn().mockReturnValue([]),
   }
+  return normalizedOverrides === undefined ? provider : Object.assign(provider, normalizedOverrides)
 }
 
 // ============================================================
@@ -391,8 +406,8 @@ describe("SessionManager.stripProviderPrefix", () => {
     expect(SessionManager.stripProviderPrefix("sshpty_term_def456")).toBe("term_def456")
   })
 
-  it("剥离 tumcup_ 前缀", () => {
-    expect(SessionManager.stripProviderPrefix("tumcup_term_ghi789")).toBe("term_ghi789")
+  it("剥离 tumcp_ 前缀", () => {
+    expect(SessionManager.stripProviderPrefix("tumcp_term_ghi789")).toBe("term_ghi789")
   })
 
   it("剥离 tmux_ 前缀", () => {
@@ -439,7 +454,7 @@ describe("SessionManager.stripProviderPrefix", () => {
       command: "bash", args: [], cwd: tempWorkspaceDir, cols: 80, rows: 24,
     })
 
-    // 模拟 LLM 添加未知前缀（不在 native_|sshpty_|tumcup_|tmux_| 列表中）
+    // 模拟 LLM 添加未知前缀（不在 native_|sshpty_|tumcp_|tmux_| 列表中）
     const unknownPrefixedId = `unknown_prefix_${session.sessionId}`
     const found = manager.getSession(unknownPrefixedId)
     expect(found.sessionId).toBe(session.sessionId)

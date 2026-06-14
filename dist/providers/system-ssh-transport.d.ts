@@ -14,6 +14,7 @@ export type SystemSshTarget = {
     host: string;
     port: number;
     username: string;
+    proxyJump?: string;
 };
 export type ExecSshCommandOptions = {
     /** key-file 认证路径；只传路径，不读取私钥内容。 */

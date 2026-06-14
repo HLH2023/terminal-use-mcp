@@ -7,6 +7,7 @@ import { createLogger } from "../../src/logger.js"
 import {
   buildRemoteExecCommand,
   buildShellExecCommand,
+  quoteWindowsPath,
   resolveSshPtyAuthConnectConfig,
   resolveSshPtyTarget,
   shellQuote,
@@ -205,6 +206,22 @@ describe("buildRemoteExecCommand", () => {
     expect(command).not.toContain("-l -ic")
     expect(command).toContain("node")
     expect(command).toContain("app.js")
+  })
+
+  it("Windows shell 路径含空格时会引用 executable", () => {
+    const shell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+    const command = buildRemoteExecCommand("node", ["app.js"], "C:\\Users\\dev", { os: "Windows", shell })
+
+    expect(quoteWindowsPath(shell)).toBe(`"${shell}"`)
+    expect(command).toContain(`"${shell}" -NoProfile -Command`)
+  })
+
+  it("quotes Windows shell path containing spaces and includes /c for cmd.exe", () => {
+    const shell = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+    const cmd = buildRemoteExecCommand("node", ["app.js"], "C:\\Users\\dev", { os: "Windows", shell })
+
+    expect(cmd).toContain('"C:\\Program Files\\PowerShell\\7\\pwsh.exe"')
+    expect(cmd).toContain("node")
   })
 })
 

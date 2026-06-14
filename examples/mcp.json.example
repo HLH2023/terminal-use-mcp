@@ -65,7 +65,7 @@
 //
 //   provider: "native-pty"   — node-pty + @xterm/headless (best quality,
 //                               requires C++ build tools for node-pty)
-//   provider: "tmux"         — tmux 3.4+ backend (works everywhere tmux
+//   provider: "tmux"         — tmux 3.2+ backend (works everywhere tmux
 //                               is available, no native addons)
 //
 // Auto-selection order: native-pty → tmux.
@@ -81,7 +81,7 @@
 // tmux-only (no native addons):
 //   env: {
 //     "TERMINAL_USE_WORKSPACE_ROOT": "/home/user/dev/project",
-//     "TERMINAL_USE_PROVIDER": "tmux"
+//     "TERMINAL_USE_PROVIDERS": "tmux"
 //   }
 //
 // Risky mode (agent asks user before running risky commands):

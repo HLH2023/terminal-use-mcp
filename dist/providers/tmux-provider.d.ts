@@ -32,8 +32,6 @@ export declare class TmuxProvider implements TerminalProvider {
     private execTmux;
     private ensureTmuxAvailable;
     private createTmuxSessionName;
-    private applyEnvironment;
-    private clearEnvironment;
     private assertSessionExists;
     private getLiveSession;
     private findTrackedSession;
@@ -45,5 +43,4 @@ export declare class TmuxProvider implements TerminalProvider {
     private parseListEntry;
     private createExternalListSession;
     private delay;
-    private errorMessage;
 }

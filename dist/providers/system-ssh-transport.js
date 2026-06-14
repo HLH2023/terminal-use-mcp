@@ -63,21 +63,15 @@ function toOpenSshTimeoutSeconds(timeoutMs) {
 }
 function buildBaseSshArgs(target, options) {
     const connectTimeoutSeconds = toOpenSshTimeoutSeconds(options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS);
-    const sshArgs = [
-        "-p",
-        String(target.port),
-        "-o",
-        "StrictHostKeyChecking=yes",
-        "-o",
-        `ConnectTimeout=${connectTimeoutSeconds}`,
-        "-o",
-        "BatchMode=yes",
-        `${target.username}@${target.host}`,
-    ];
+    const sshArgs = [];
     if (options.keyFile !== undefined) {
-        // 与 OpenSSH 惯例一致：-i 放在 host 前，且作为独立 argv 传入。
-        sshArgs.unshift("-i", options.keyFile);
+        sshArgs.push("-i", options.keyFile);
     }
+    sshArgs.push("-p", String(target.port), "-o", "StrictHostKeyChecking=yes", "-o", `ConnectTimeout=${connectTimeoutSeconds}`, "-o", "BatchMode=yes");
+    if (target.proxyJump !== undefined && target.proxyJump.trim().length > 0) {
+        sshArgs.push("-o", `ProxyJump=${target.proxyJump.trim()}`);
+    }
+    sshArgs.push(`${target.username}@${target.host}`);
     return sshArgs;
 }
 function executeSshFile(target, args, options, execTimeoutMs) {

@@ -121,3 +121,5 @@ export declare function buildShellExecCommand(command: string, args: string[]): 
  * Windows: <remote-shell> /c "cd <cwd> && <command> <args...>"
  */
 export declare function buildRemoteExecCommand(command: string, args: string[], cwd: string, capabilities?: Pick<RemoteCapabilities, "os" | "shell">): string;
+/** Quote a Windows executable path when it contains spaces. */
+export declare function quoteWindowsPath(path: string): string;

@@ -10,8 +10,9 @@
  * 通过 Zod RootConfigSchema 校验，支持 ${ENV_VAR} 占位符展开。
  */
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "./logger.js";
-import { getConfigFilePath, ensureConfigDir } from "./targets/xdg-paths.js";
+import { getConfigFilePath, ensureConfigDir, getDataDir } from "./targets/xdg-paths.js";
 import { RootConfigSchema, expandEnvVars, expandTildeInObject } from "./targets/config-schema.js";
 /** 所有已知 provider 名称，用于 enabledProviders 默认值 */
 const ALL_PROVIDER_NAMES = ["native-pty", "tmux", "ssh-pty", "ssh-tmux"];
@@ -78,7 +79,6 @@ function mergeCsvWithFileDefault(envValue, fileValue, fallback) {
 }
 export function loadConfig(overrides) {
     const env = process.env;
-    const pkgDir = new URL("..", import.meta.url).pathname;
     // 确保 XDG 配置目录存在（0700）
     ensureConfigDir();
     // 加载 config.json（可选）
@@ -107,7 +107,7 @@ export function loadConfig(overrides) {
         defaultRows: env.TERMINAL_USE_DEFAULT_ROWS !== undefined
             ? parseInt(env.TERMINAL_USE_DEFAULT_ROWS, 10)
             : local?.defaultRows ?? 30,
-        artifactDir: env.TERMINAL_USE_ARTIFACT_DIR ?? local?.artifactDir ?? `${pkgDir}/artifacts`,
+        artifactDir: env.TERMINAL_USE_ARTIFACT_DIR ?? local?.artifactDir ?? join(getDataDir(env), "artifacts"),
         largePasteLimit: env.TERMINAL_USE_LARGE_PASTE_LIMIT !== undefined
             ? parseInt(env.TERMINAL_USE_LARGE_PASTE_LIMIT, 10)
             : 2000,
