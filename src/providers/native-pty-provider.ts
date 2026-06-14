@@ -480,7 +480,11 @@ export class NativePtyProvider implements TerminalProvider {
         name: "pty.kill",
         fn: () => {
           if (session.pty !== null) {
-            session.pty.kill()
+            if (process.platform === "win32") {
+              session.pty.kill()
+            } else {
+              session.pty.kill("SIGTERM")
+            }
             session.pty = null
           }
         },

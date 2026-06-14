@@ -10,7 +10,7 @@ This skill is designed to be **trimmed to your needs**. Each section is self-con
 | Section | Content | Safe to Remove? |
 |---------|---------|-----------------|
 | §1 What This Tool Is For | Purpose, when to use/not use | ⚠️ Keep — essential for correct tool usage |
-| §2 Provider Selection | native-pty vs tmux choice | ✅ Remove if you always use native-pty |
+| §2 Provider Selection | native-pty vs tmux choice, provider availability | ✅ Remove if you always use native-pty |
 | §3 Standard Operation Loop | Core workflow (snapshot → act → wait) | ⚠️ Keep — critical for correct operation |
 | §4 Tool Quick Reference | Parameter tables for all 22 tools | ✅ Remove if your AI already knows the tool schemas |
 | §5 Available Key Names | Key name list | ✅ Remove — AI can call `terminal.keys` instead |
@@ -72,6 +72,10 @@ Two local backends (providers) are available. Choose based on your needs:
 - The session needs to survive if the MCP server restarts
 - You're working with another human who might also attach
 
+> **Provider availability**: The MCP server administrator controls which providers are enabled via the `TERMINAL_USE_PROVIDERS` environment variable. If a provider is disabled, `terminal.health` reports it as `"disabled by TERMINAL_USE_PROVIDERS config"`. You cannot override this — use whichever provider is available.
+
+> **Windows**: On native Windows, only `native-pty` is available by default (shell auto-detected via `ComSpec` → `cmd.exe`). The `tmux` provider requires a Unix PTY multiplexer — install [psmux](https://github.com/psmux/psmux) (tmux-compatible, 83 commands, provides `tmux` alias) or use WSL2 where both providers work. If `tmux` is not on PATH on any platform, set `TERMINAL_USE_TMUX_PATH` to its absolute or relative path.
+
 ## 3. Standard Operation Loop
 
 This is the core workflow you MUST follow:
@@ -104,7 +108,7 @@ snapshot → analyze → type/press → wait → snapshot
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
 | `terminal.start` | Start a new terminal session | `command`, `args?`, `cwd`, `cols?`, `rows?`, `provider?`, `env?`, `label?`, `ttlMs?`, `transcript?` |
-| `terminal.attach` | Attach to existing session (tmux or tui-use) | `sessionId` OR `tmuxSessionName` |
+| `terminal.attach` | Attach to existing session (tmux) | `sessionId` OR `tmuxSessionName` |
 | `terminal.list` | List all active sessions | _(none)_ |
 | `terminal.info` | Get detailed session info | `sessionId` |
 | `terminal.rename` | Rename a session's label | `sessionId`, `label` |
@@ -341,15 +345,15 @@ terminal.kill({ sessionId: "tumcp_s1t2u3" })
 ```
 // Export with secret redaction (RECOMMENDED)
 terminal.export_transcript({
-  sessionId: "tumcp_v1w2x3",
+  sessionId: "tumcp_a7b8c9",
   redact: true,
   format: "txt",
   includeSnapshots: false
 })
-→ { path: "artifacts/sessions/tumcp_v1w2x3/transcript.redacted.txt", redacted: 3, eventCount: 42 }
+→ { path: "artifacts/sessions/tumcp_a7b8c9/transcript.redacted.txt", redacted: 3, eventCount: 42 }
 
 // Then kill the session
-terminal.kill({ sessionId: "tumcp_v1w2x3" })
+terminal.kill({ sessionId: "tumcp_a7b8c9" })
 ```
 
 ---
@@ -456,6 +460,9 @@ Add the following to your MCP configuration (e.g., `mcp.json` or equivalent):
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `TERMINAL_USE_PROVIDERS` | All providers | Enabled provider whitelist (comma-separated) |
+| `TERMINAL_USE_DEFAULT_PROVIDER` | `native-pty` | Default provider (overrides auto-selection priority) |
+| `TERMINAL_USE_TMUX_PATH` | `tmux` | Absolute or relative path to tmux binary (when not on PATH) |
 | `TERMINAL_USE_WORKSPACE_ROOT` | `process.cwd()` | Root directory for CWD validation |
 | `TERMINAL_USE_ALLOWED_CWD` | _(empty)_ | Comma-separated additional allowed directories |
 | `TERMINAL_USE_SESSION_TTL_MS` | `3600000` (1 hour) | Session auto-cleanup timeout |
@@ -489,13 +496,13 @@ Before reaching for `terminal-use-mcp`, ask yourself:
 
 ---
 
-> **§12-§17 are for V2 Remote Terminal Control. If you only use local terminals, you can delete everything from §12 onwards.**
+> **§12-§17 cover Remote Terminal Control. If you only use local terminals, you can delete everything from §12 onwards.**
 
 ---
 
-## 12. Remote Terminal Control (V2)
+## 12. Remote Terminal Control
 
-V2 adds the ability to control TUI programs on **remote SSH hosts** through the same MCP interface.
+Remote terminal control lets you control TUI programs on **remote SSH hosts** through the same MCP interface.
 
 ### When to Use Remote vs Local Terminal Control
 
@@ -529,7 +536,7 @@ The screen content from a remote session is even less trustworthy than local out
 
 ### SSH Profile-Based Access (Default)
 
-V2 requires SSH targets to be defined in a **hosts.json** profile file. This prevents agents from connecting to arbitrary hosts.
+SSH targets must be defined in a **hosts.json** profile file. This prevents agents from connecting to arbitrary hosts.
 
 ```json
 // terminal.start with profile (RECOMMENDED)
@@ -561,7 +568,7 @@ Inline host specification (host/port/username directly in the call) is **denied 
 
 ## 13. Remote Safety Rules (MUST ENFORCE)
 
-These rules supplement the V1 safety rules in §6. They are **non-negotiable** for any remote session.
+These rules supplement the local safety rules in §6. They are **non-negotiable** for any remote session.
 
 ### Rule 1: Do not auto-accept unknown SSH host keys
 
@@ -717,7 +724,7 @@ If verification fails, the output includes an error code from §15 and a human-r
 
 ## 15. Remote Error Codes
 
-These error codes supplement the V1 error codes in §9. All are returned in the standard error envelope format.
+These error codes supplement the local error codes in §9. All are returned in the standard error envelope format.
 
 | Code | Meaning | What To Do |
 |------|---------|------------|
@@ -953,7 +960,7 @@ TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1
 
 This is intended for development and testing only. Production use should always rely on SSH profiles.
 
-### New Environment Variables (V2)
+### Remote Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

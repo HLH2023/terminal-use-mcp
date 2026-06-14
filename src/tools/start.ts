@@ -31,7 +31,7 @@ export function registerStartTool(server: McpServer, sm: SessionManager, logger:
     {
       description: "Start a new terminal session",
       inputSchema: {
-        command: z.string().min(1).describe("Command to run. Complex commands containing spaces or shell syntax are automatically wrapped with /bin/sh -c when args is empty."),
+        command: z.string().min(1).describe("Command to run. On Unix, complex commands are automatically wrapped with /bin/sh -c; on Windows, with cmd.exe /c."),
         args: z.array(z.string()).default([]).optional().describe("Command arguments"),
         cwd: z.string().min(1).describe("Working directory"),
         cols: z.number().default(120).optional().describe("Terminal columns"),

@@ -16,6 +16,9 @@ import { logger } from "./logger.js"
 import { getConfigFilePath, ensureConfigDir } from "./targets/xdg-paths.js"
 import { RootConfigSchema, expandEnvVars, expandTildeInObject } from "./targets/config-schema.js"
 
+/** 所有已知 provider 名称，用于 enabledProviders 默认值 */
+const ALL_PROVIDER_NAMES: ProviderName[] = ["native-pty", "tmux", "ssh-pty", "ssh-tmux"]
+
 export type TerminalUseConfig = {
   workspaceRoot: string
   allowedCwdRoots: string[]
@@ -34,6 +37,8 @@ export type TerminalUseConfig = {
   hostsConfigPath?: string
   allowInlineSshTargets: boolean
   sshDefaults: SshDefaultsConfig
+  /** 启用的 provider 白名单。未设置=全部启用 */
+  enabledProviders: ProviderName[]
 }
 
 export type SshDefaultsConfig = {
@@ -107,6 +112,7 @@ type RootConfigFileData = {
     defaultRows?: number
     artifactDir?: string
     logLevel?: "debug" | "info" | "warn" | "error"
+    providers?: string[]
   }
   sshDefaults?: {
     remoteDeniedCwd?: string[]
@@ -144,6 +150,10 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
   const sshDefaults = fileConfig?.sshDefaults
 
   // 分层合并：文件默认值 → 环境变量覆盖
+  const enabledProviders = parseEnabledProviders(
+    env.TERMINAL_USE_PROVIDERS,
+    local?.providers,
+  )
   const config: TerminalUseConfig = {
     workspaceRoot: env.TERMINAL_USE_WORKSPACE_ROOT ?? local?.workspaceRoot ?? process.cwd(),
     allowedCwdRoots: mergeCsvWithFileDefault(env.TERMINAL_USE_ALLOWED_CWD, local?.allowedCwdRoots, []),
@@ -179,7 +189,37 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
       connectTimeoutMs: sshDefaults?.connectTimeoutMs ?? 10000,
       keepaliveIntervalMs: sshDefaults?.keepaliveIntervalMs ?? 15000,
     },
+    enabledProviders,
   }
 
   return { ...config, ...overrides }
+}
+
+/**
+ * 解析启用的 provider 列表。
+ *
+ * 优先级：环境变量 TERMINAL_USE_PROVIDERS > config.json local.providers > 全部启用
+ * 环境变量格式：逗号分隔，如 "native-pty,tmux"
+ * 无效名称会被过滤并输出 warn 日志
+ */
+function parseEnabledProviders(
+  envValue: string | undefined,
+  fileValue: string[] | undefined,
+): ProviderName[] {
+  const raw = envValue?.trim() ?? ""
+  if (raw.length > 0) {
+    return splitCsv(raw).filter((name): name is ProviderName => {
+      if (ALL_PROVIDER_NAMES.includes(name as ProviderName)) return true
+      logger.warn(`TERMINAL_USE_PROVIDERS: unknown provider "${name}", ignoring`)
+      return false
+    })
+  }
+  if (fileValue !== undefined && fileValue.length > 0) {
+    return fileValue.filter((name): name is ProviderName => {
+      if (ALL_PROVIDER_NAMES.includes(name as ProviderName)) return true
+      logger.warn(`config.json local.providers: unknown provider "${name}", ignoring`)
+      return false
+    })
+  }
+  return [...ALL_PROVIDER_NAMES]
 }

@@ -626,8 +626,9 @@ function formatUnknownError(err: unknown): string {
 }
 
 function execLocalTmuxCommand(args: readonly string[]): Promise<TmuxCommandResult> {
+  const tmuxBin = process.env.TERMINAL_USE_TMUX_PATH ?? "tmux"
   return new Promise<TmuxCommandResult>((resolve, reject) => {
-    execFile("tmux", [...args], { timeout: TMUX_TOOL_EXEC_TIMEOUT_MS, maxBuffer: TMUX_TOOL_MAX_BUFFER_BYTES }, (error, stdout, stderr) => {
+    execFile(tmuxBin, [...args], { timeout: TMUX_TOOL_EXEC_TIMEOUT_MS, maxBuffer: TMUX_TOOL_MAX_BUFFER_BYTES }, (error, stdout, stderr) => {
       const normalizedStdout = stdout ?? ""
       const normalizedStderr = stderr ?? ""
 
@@ -637,7 +638,7 @@ function execLocalTmuxCommand(args: readonly string[]): Promise<TmuxCommandResul
       }
 
       if (error.code === "ENOENT") {
-        reject(new DependencyMissingError("tmux", "Install tmux 3.4+ and ensure it is available on PATH"))
+        reject(new DependencyMissingError("tmux", "Install tmux 3.2+ or set TERMINAL_USE_TMUX_PATH to a tmux-compatible binary (e.g. psmux on Windows)"))
         return
       }
 
@@ -689,7 +690,7 @@ function createTmuxCommandError(
   if (isTmuxMissing(output)) {
     return provider === "ssh-tmux"
       ? new RemoteTmuxNotAvailableError(sessionName ?? "ssh-tmux")
-      : new DependencyMissingError("tmux", "Install tmux 3.4+ and ensure it is available on PATH")
+      : new DependencyMissingError("tmux", "Install tmux 3.2+ or set TERMINAL_USE_TMUX_PATH to a tmux-compatible binary (e.g. psmux on Windows)")
   }
   return new InternalError(`${provider} ${action} failed`, {
     exitCode: result.exitCode,

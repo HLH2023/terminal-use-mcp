@@ -2,7 +2,7 @@
 
 演示如何使用 `ssh-pty` provider 连接远程主机，启动 Python REPL，执行代码并检索输出。
 
-> V2 远程功能处于设计阶段，尚未实现。完整设计参见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](../docs/V2_REMOTE_TERMINAL_GUIDE.md)。
+> Remote SSH features are available. Full design: [REMOTE_TERMINAL_GUIDE.md](../docs/REMOTE_TERMINAL_GUIDE.md).
 
 ## 前提
 

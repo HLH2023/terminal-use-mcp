@@ -1,156 +1,156 @@
 # tui-claude-code: Control Claude Code TUI
 
+> This skill is optional. Only install if you need to control this agent's TUI via terminal-use-mcp.
+
 > This skill is useful when one AI agent needs to remotely control a Claude Code TUI session via terminal-use-mcp.
 
-> **This skill is optional.** Only install if you need to control this agent's TUI via terminal-use-mcp. You can freely trim or remove sections you don't need — every section is self-contained.
+Operational skill for controlling the Claude Code TUI through terminal-use-mcp. Includes complete key mappings, slash commands, permission modes, and interaction flows.
 
-通过 terminal-use-mcp 控制 Claude Code TUI 的操作技能。包含完整按键映射、slash 命令、权限模式和交互流程。
+## When To Use
 
-## 何时使用
+- You need to start and interactively control a Claude Code TUI through terminal-use-mcp.
+- You need to switch permission modes or run slash commands inside Claude Code.
+- You need to read Claude Code conversation content or search historical messages.
+- You need advanced features such as the transcript viewer, `/btw` side questions, or background tasks.
 
-- 需要通过 terminal-use-mcp 启动并交互控制 Claude Code TUI
-- 需要在 Claude Code 内切换权限模式、执行斜杠命令
-- 需要读取 Claude Code 对话内容、搜索历史消息
-- 需要使用 transcript viewer、侧问、后台任务等高级功能
+## Core Operation Flow
 
-## 核心操作流程
-
-### 启动与就绪检测
+### Start And Readiness Check
 
 ```
 1. terminal.start(command="claude", cwd="~/project")
 2. terminal.wait_stable(idleMs=5000, timeoutMs=15000)
-3. terminal.find("claude|Hi|What")  # 确认 UI 就绪
+3. terminal.find("claude|Hi|What")  # Confirm the UI is ready
 ```
 
-### 发送消息
+### Send A Message
 
 ```
-terminal.type("你的问题")
+terminal.type("your question")
 terminal.press("enter")
-terminal.wait_stable(idleMs=15000, timeoutMs=120000)  # 等待模型回复
+terminal.wait_stable(idleMs=15000, timeoutMs=120000)  # Wait for the model response
 ```
 
-### 中断与退出
+### Interrupt And Exit
 
 ```
-terminal.press("escape")           # 中断当前响应/工具调用
-terminal.press("ctrl+c")           # 中断输入；第二次退出
-terminal.press("ctrl+d")          # 退出
+terminal.press("escape")          # Interrupt the current response/tool call
+terminal.press("ctrl+c")          # Interrupt input; press a second time to exit
+terminal.press("ctrl+d")          # Exit
 ```
 
-## 全局快捷键
+## Global Keybindings
 
-| 按键 | 功能 | 说明 |
-|------|------|------|
-| `ctrl+c` | 中断/清空输入 | 第一次清输入，第二次退出 |
-| `escape` | 中断当前响应/工具调用 | 停止正在进行的生成 |
-| `escape`+`escape` | 清空草稿/打开 rewind | 空输入时双击 Esc 开启 rewind |
-| `ctrl+d` | 退出 | 直接退出 |
-| `ctrl+l` | 重绘屏幕 | 刷新终端显示 |
-| `ctrl+o` | Transcript viewer | 查看/浏览完整对话记录 |
-| `ctrl+r` | 历史搜索 | 搜索之前的命令 |
-| `ctrl+b` | 后台运行任务 | 将当前任务转后台 |
-| `ctrl+t` | 任务列表 | 查看后台任务 |
-| `shift+tab` | 切换权限模式 | 在 default → acceptEdits → plan 间循环 |
-| `alt+p` / `option+p` | 切换模型 | 打开模型选择 |
-| `alt+t` / `option+t` | 切换 extended thinking | 开关深度思考 |
-| `alt+o` / `option+o` | 切换 fast mode | 快速模式 |
-| `ctrl+g` / `ctrl+x`+`ctrl+e` | 外部编辑器 | 用外部编辑器编辑消息 |
-| `ctrl+j` | 插入换行 | 在输入框中换行 |
-| `ctrl+v` / `cmd+v` / `alt+v` | 粘贴图片 | 粘贴剪贴板中的图片 |
-| `↑`/`↓` 或 `ctrl+p`/`ctrl+n` | 光标移动/历史 | 上下移动或浏览历史消息 |
+| Key | Function | Notes |
+|-----|----------|-------|
+| `ctrl+c` | Interrupt / clear input | First press clears input, second press exits |
+| `escape` | Interrupt current response/tool call | Stops active generation |
+| `escape`+`escape` | Clear draft / open rewind | Double Esc opens rewind when input is empty |
+| `ctrl+d` | Exit | Exit directly |
+| `ctrl+l` | Redraw screen | Refresh terminal display |
+| `ctrl+o` | Transcript viewer | View/browse the full conversation record |
+| `ctrl+r` | History search | Search previous commands |
+| `ctrl+b` | Background current task | Move the current task to the background |
+| `ctrl+t` | Task list | View background tasks |
+| `shift+tab` | Cycle permission mode | Cycles default -> acceptEdits -> plan |
+| `alt+p` / `option+p` | Switch model | Open model picker |
+| `alt+t` / `option+t` | Toggle extended thinking | Enable/disable deeper thinking |
+| `alt+o` / `option+o` | Toggle fast mode | Fast mode |
+| `ctrl+g` / `ctrl+x`+`ctrl+e` | External editor | Edit the message in an external editor |
+| `ctrl+j` | Insert newline | Add a line break in the input box |
+| `ctrl+v` / `cmd+v` / `alt+v` | Paste image | Paste an image from the clipboard |
+| `up`/`down` or `ctrl+p`/`ctrl+n` | Cursor movement / history | Move up/down or browse message history |
 
-## 权限模式
+## Permission Modes
 
-| 模式 | 行为 | 入口 |
-|------|------|------|
-| `default` | 只读 | 默认 / `shift+tab` 循环 |
-| `acceptEdits` | 允许常规编辑和常见文件操作 | `shift+tab` 循环 |
-| `plan` | 只研究、不改文件 | `shift+tab` 循环 |
-| `auto` | 自动执行，带安全分类器 | 需满足条件后加入循环 |
-| `dontAsk` | 仅预批准工具 | 需满足条件后加入循环 |
-| `bypassPermissions` | 跳过检查（仅隔离环境） | 需满足条件后加入循环 |
+| Mode | Behavior | Entry |
+|------|----------|-------|
+| `default` | Read-only | Default / `shift+tab` cycle |
+| `acceptEdits` | Allow regular edits and common file operations | `shift+tab` cycle |
+| `plan` | Research only, no file changes | `shift+tab` cycle |
+| `auto` | Automatic execution with safety classifier | Added to the cycle only after conditions are met |
+| `dontAsk` | Pre-approved tools only | Added to the cycle only after conditions are met |
+| `bypassPermissions` | Skip checks; isolated environments only | Added to the cycle only after conditions are met |
 
-**操作**：`shift+tab` 默认在 `default → acceptEdits → plan` 间循环。
+**Operation**: `shift+tab` cycles between `default -> acceptEdits -> plan` by default.
 
 ## Transcript Viewer
 
-| 按键 | 功能 |
-|------|------|
-| `?` | 帮助 |
-| `{`/`}` | 跳转上/下一个用户消息 |
-| `ctrl+e` | 显示全部 |
-| `[` | 导出到终端滚动区 |
-| `v` | 写临时文件 |
-| `q`/`ctrl+c`/`escape` | 退出 |
+| Key | Function |
+|-----|----------|
+| `?` | Help |
+| `{`/`}` | Jump to previous/next user message |
+| `ctrl+e` | Show all |
+| `[` | Export to terminal scrollback |
+| `v` | Write to a temporary file |
+| `q`/`ctrl+c`/`escape` | Exit |
 
-## /btw 侧问
+## /btw Side Questions
 
-| 按键 | 功能 |
-|------|------|
-| `space`/`enter`/`escape` | 关闭侧问 |
-| `up`/`down` | 滚动内容 |
-| `c` | 复制 |
-| `f` | 分叉到新会话 |
-| `x` | 清除历史侧问 |
+| Key | Function |
+|-----|----------|
+| `space`/`enter`/`escape` | Close side question |
+| `up`/`down` | Scroll content |
+| `c` | Copy |
+| `f` | Fork to a new session |
+| `x` | Clear historical side questions |
 
-## Slash 命令速查
+## Slash Command Quick Reference
 
-| 命令 | 功能 |
-|------|------|
-| `/help` | 显示帮助 |
-| `/compact` | 压缩上下文 |
-| `/clear` | 开启新对话 |
-| `/model` | 切换模型（无参数打开选择器） |
-| `/plan` | 进入 plan 模式 |
-| `/fast` | 切换 fast mode |
-| `/config` | 打开设置 |
-| `/keybindings` | 打开快捷键配置 |
-| `/terminal-setup` | 配置终端换行/Meta 键/tmux |
-| `/context` | 查看上下文占用 |
-| `/resume` | 回到旧会话 |
-| `/branch` / `/fork` | 分叉会话/子代理 |
-| `/agents` | 管理 subagents |
-| `/background` / `/bg` | 转后台会话 |
-| `/tasks` | 查看后台任务 |
-| `/diff` | 查看差异 |
-| `/doctor` | 诊断 |
-| `/debug` | 调试 |
-| `/btw` | 侧问 |
-| `/goal` | 追踪目标 |
-| `/cd` | 移动工作目录 |
-| `/plugin` | 插件管理 |
-| `/workflows` | 工作流 |
-| `/usage` | 用量统计 |
-| `/desktop` | 桌面模式 |
-| `/remote-control` | 远程控制 |
-| `/teleport` | 传送 |
-| `/voice` | 语音 |
-| `/theme` | 主题 |
+| Command | Function |
+|---------|----------|
+| `/help` | Show help |
+| `/compact` | Compact context |
+| `/clear` | Start a new conversation |
+| `/model` | Switch model; without arguments opens the picker |
+| `/plan` | Enter plan mode |
+| `/fast` | Toggle fast mode |
+| `/config` | Open settings |
+| `/keybindings` | Open keybinding configuration |
+| `/terminal-setup` | Configure terminal newline, Meta key, and tmux behavior |
+| `/context` | Show context usage |
+| `/resume` | Return to an old session |
+| `/branch` / `/fork` | Fork session/subagent |
+| `/agents` | Manage subagents |
+| `/background` / `/bg` | Move session to background |
+| `/tasks` | View background tasks |
+| `/diff` | View diff |
+| `/doctor` | Diagnostics |
+| `/debug` | Debug |
+| `/btw` | Side question |
+| `/goal` | Track goal |
+| `/cd` | Change working directory |
+| `/plugin` | Plugin management |
+| `/workflows` | Workflows |
+| `/usage` | Usage statistics |
+| `/desktop` | Desktop mode |
+| `/remote-control` | Remote control |
+| `/teleport` | Teleport |
+| `/voice` | Voice |
+| `/theme` | Theme |
 
-## 读取长对话
+## Reading Long Conversations
 
-Claude Code 使用 Ink TUI（alt buffer），scrollback 为 0。
+Claude Code uses an Ink TUI with the alt buffer, so terminal scrollback is 0.
 
-**推荐方法**：
-1. `terminal.press("ctrl+o")` — 打开 Transcript viewer 查看完整对话
-2. `mouse_scroll(direction="up")` — 鼠标滚轮向上滚动对话
-3. `snapshot()` — 读取当前可见区
-4. `find(pattern, {includeScrollback: true})` — 在 native-pty buffer 中搜索
+**Recommended method**:
+1. `terminal.press("ctrl+o")` - open the transcript viewer to inspect the full conversation.
+2. `mouse_scroll(direction="up")` - scroll the conversation upward with the mouse wheel.
+3. `snapshot()` - read the current visible viewport.
+4. `find(pattern, {includeScrollback: true})` - search inside the native-pty buffer.
 
-## 常见操作示例
+## Common Operation Examples
 
-### 切换权限模式
+### Switch Permission Mode
 
 ```
-terminal.press("shift+tab")                             # 切换模式
+terminal.press("shift+tab")                            # Cycle mode
 terminal.wait_stable(idleMs=1000)
-terminal.snapshot()                                      # 确认当前模式
-terminal.find("acceptEdits|plan|default")               # 验证模式名称
+terminal.snapshot()                                     # Confirm the current mode
+terminal.find("acceptEdits|plan|default")              # Verify the mode name
 ```
 
-### 查看差异
+### View Diff
 
 ```
 terminal.type("/diff")
@@ -159,31 +159,31 @@ terminal.wait_stable(idleMs=3000)
 terminal.snapshot()
 ```
 
-### 后台任务
+### Background Tasks
 
 ```
-terminal.press("ctrl+b")                # 将当前任务转后台
-terminal.press("ctrl+t")                # 查看后台任务列表
+terminal.press("ctrl+b")               # Move the current task to the background
+terminal.press("ctrl+t")               # View the background task list
 terminal.type("/tasks")
 terminal.press("enter")
 ```
 
-### 侧问功能
+### Side Question Feature
 
 ```
 terminal.type("/btw")
 terminal.press("enter")
 terminal.wait_stable(idleMs=3000)
-terminal.type("你的侧问问题")          # 在侧问中输入
+terminal.type("your side question")    # Type inside the side question prompt
 terminal.press("enter")
 ```
 
-## 注意事项
+## Notes
 
-1. **Esc 双击**：快速双击 Esc 可能触发 rewind — 空输入时注意
-2. **权限模式循环**：`shift+tab` 只在 `default → acceptEdits → plan` 间循环；`auto`/`bypassPermissions` 需满足条件
-3. **外部编辑器**：`ctrl+g` 依赖 `$EDITOR` 或 `$VISUAL` 环境变量
-4. **图片粘贴**：`ctrl+v` 需要剪贴板中有图片数据
-5. **Ink TUI**：使用 alt buffer，`mode: "full"` 也只返回当前可见区
+1. **Double Esc**: Quickly pressing Esc twice may trigger rewind, especially when input is empty.
+2. **Permission mode cycle**: `shift+tab` only cycles `default -> acceptEdits -> plan`; `auto` and `bypassPermissions` require additional conditions.
+3. **External editor**: `ctrl+g` depends on the `$EDITOR` or `$VISUAL` environment variable.
+4. **Image paste**: `ctrl+v` requires image data in the clipboard.
+5. **Ink TUI**: It uses the alt buffer; `mode: "full"` still returns only the current visible viewport.
 
 > For the base terminal control skill, see [terminal-use](../terminal-use/SKILL.md).

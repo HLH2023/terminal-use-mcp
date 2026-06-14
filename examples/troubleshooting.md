@@ -272,10 +272,10 @@ sudo apt-get install tmux
 # Install tmux (macOS)
 brew install tmux
 
-# Verify version (need 3.4+ for pipe-pane and other features)
+# Verify version (need 3.2+ for resize-window and other features)
 tmux -V
 # tmux 3.4  ← good
-# tmux 3.3a ← may work, 3.4+ recommended
+# tmux 3.3a ← may work, 3.2+ required
 ```
 
 For older systems, consider building tmux from source or using the

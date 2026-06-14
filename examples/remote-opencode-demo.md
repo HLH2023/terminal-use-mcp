@@ -2,7 +2,7 @@
 
 演示如何使用 `ssh-pty` provider 连接远程主机，启动 OpenCode，发送分析任务并监控输出。
 
-> V2 远程功能处于设计阶段，尚未实现。完整设计参见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](../docs/V2_REMOTE_TERMINAL_GUIDE.md)。
+> Remote SSH features are available. Full design: [REMOTE_TERMINAL_GUIDE.md](../docs/REMOTE_TERMINAL_GUIDE.md).
 
 > 安全关键: OpenCode 内部可能调用 tool broker 执行 shell 命令、文件操作。如果出现权限确认提示，必须 STOP 并询问用户。
 

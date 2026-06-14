@@ -89,6 +89,16 @@ export function createMcpServer(
    * 从 ReadonlyMap 构造一份可变副本。 */
   const mutableProviders = new Map<ProviderName, TerminalProvider>(providers)
 
+  const ALL_PROVIDER_NAMES: ProviderName[] = ["native-pty", "tmux", "ssh-pty", "ssh-tmux"]
+  const enabledSet = config.enabledProviders.length > 0
+    ? new Set(config.enabledProviders)
+    : null
+  const disabledProviders = new Set<ProviderName>(
+    enabledSet
+      ? ALL_PROVIDER_NAMES.filter((n) => !enabledSet.has(n))
+      : [],
+  )
+
   // ── Session lifecycle (7) ──
   registerStartTool(server, sm, logger)
   registerAttachTool(server, sm, logger)
@@ -113,7 +123,7 @@ export function createMcpServer(
   // ── Meta (7) ──
   registerResizeTool(server, executor)
   registerExportTranscriptTool(server, sm, config.artifactDir)
-  registerHealthTool(server, mutableProviders)
+  registerHealthTool(server, mutableProviders, disabledProviders)
   registerKeysTool(server)
   registerProviderCapabilitiesTool(server, mutableProviders)
   registerEventsTool(server, executor)

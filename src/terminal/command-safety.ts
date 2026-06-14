@@ -378,7 +378,7 @@ function isSubdirectoryCanonical(childCanonical: string, parentCanonical: string
  * node-pty 的 spawn(command, args) 不会像人类 shell 一样拆分字符串；如果把
  * `whiptail --title ...` 整段放进 command，底层会尝试寻找一个名为整段字符串的可执行文件，
  * 最终报 `execvp(3) failed`。因此在"用户没有显式传 args"且 command 本身包含空格或
- * shell 元字符时，内部改写为 `/bin/sh -c <原始命令>`，让 shell 负责解析复杂命令。
+ * shell 元字符时，内部改写为 shell -c <原始命令>（Unix: /bin/sh, Windows: cmd.exe），让 shell 负责解析复杂命令。
  *
  * 安全边界：该函数只做内部可用性包装，不做安全放行。调用方必须先用包装前的原始
  * command 做 denylist 检查，确保原始 base command（例如 `rm;echo ok` 中的 `rm`）已被拦截。
@@ -392,10 +392,17 @@ export function maybeWrapWithShell(input: StartInput): StartInput {
     return input
   }
 
+  const shell = process.platform === "win32"
+    ? (process.env.ComSpec ?? "cmd.exe")
+    : "/bin/sh"
+  const shellArgs = process.platform === "win32"
+    ? ["/c", input.command]
+    : ["-c", input.command]
+
   return {
     ...input,
-    command: "/bin/sh",
-    args: ["-c", input.command],
+    command: shell,
+    args: shellArgs,
   }
 }
 

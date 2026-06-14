@@ -45,6 +45,15 @@ export function getConfigDir(env: NodeJS.ProcessEnv = process.env): string {
     return join(homedir(), "Library", "Application Support", APP_NAME)
   }
 
+  // Windows fallback：%APPDATA%/terminal-use-mcp
+  if (process.platform === "win32") {
+    const appData = env.APPDATA
+    if (appData !== undefined && appData.trim().length > 0) {
+      return join(appData, APP_NAME)
+    }
+    return join(homedir(), "AppData", "Roaming", APP_NAME)
+  }
+
   // 默认 Linux/其他：~/.config/terminal-use-mcp
   return join(homedir(), ".config", APP_NAME)
 }
@@ -68,6 +77,14 @@ export function getDataDir(env: NodeJS.ProcessEnv = process.env): string {
 
   if (process.platform === "darwin") {
     return join(homedir(), "Library", "Application Support", APP_NAME, "data")
+  }
+
+  if (process.platform === "win32") {
+    const localAppData = env.LOCALAPPDATA
+    if (localAppData !== undefined && localAppData.trim().length > 0) {
+      return join(localAppData, APP_NAME)
+    }
+    return join(homedir(), "AppData", "Local", APP_NAME)
   }
 
   return join(homedir(), ".local", "share", APP_NAME)

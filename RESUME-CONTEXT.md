@@ -23,7 +23,7 @@
 1. Phase 2: Terminal 层 — xterm-adapter.ts / screen-buffer.ts / highlights.ts / wait.ts / transcript.ts
 2. Phase 3: SessionManager + PromiseQueue + TTL cleanup
 3. Phase 4: NativePtyProvider (node-pty + @xterm/headless)
-4. Phase 5: TmuxProvider (tmux 3.4)
+4. Phase 5: TmuxProvider (tmux 3.2+ required)
 5. Phase 6: 已取消（冗余外部 CLI provider 已删除）
 6. Phase 7: 22 MCP tools 注册
 7. Phase 8: MCP Resources + Prompts

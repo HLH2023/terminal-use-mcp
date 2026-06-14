@@ -6,6 +6,15 @@ Local + remote terminal interaction control MCP Server. Lets AI agents control i
 
 [![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
 
+| Platform | Status |
+|----------|--------|
+| Linux x86_64 / ARM64 | Supported |
+| macOS Intel / Apple Silicon | Supported (best effort) |
+| WSL2 | Supported (best effort) |
+| Native Windows | Experimental (native-pty only; tmux requires [psmux](https://github.com/psmux/psmux) or WSL2) |
+
+> **Windows users**: The `native-pty` provider works on Windows (shell auto-detection: `ComSpec` → `cmd.exe`). The `tmux` provider requires a Unix PTY multiplexer — install [psmux](https://github.com/psmux/psmux) (tmux-compatible, 83 commands, uses `tmux` as alias) or use WSL2. If `tmux` is not on PATH, set `TERMINAL_USE_TMUX_PATH` to its absolute or relative path.
+
 This is not a shell runner. Use your bash tool for simple commands. This server handles TUI programs that require keyboard interaction: lazygit, vim, htop, Python REPL, debuggers, installers, external agent TUIs (Claude Code, Codex CLI, OpenCode).
 
 ## Concept
@@ -28,7 +37,7 @@ Unlike `tmux send-keys` + `sleep`, the server observes PTY render events directl
 
 | Dependency | Minimum | Purpose |
 |------------|---------|---------|
-| Node.js | 18+ | Run the MCP server |
+| Node.js | 20+ | Run the MCP server |
 | npm | 8+ | Install dependencies |
 | node-gyp + C++ toolchain | — | Compile node-pty (optional; fallback to tmux if missing) |
 | tmux | 3.2+ | tmux provider (optional; only native-pty available if missing) |
@@ -47,7 +56,8 @@ Add to `.mcp.json` (project root) or `claude_desktop_config.json`:
       "args": ["-y", "terminal-use-mcp"],
       "env": {
         "TERMINAL_USE_WORKSPACE_ROOT": "<your-project-path>",
-        "TERMINAL_USE_ALLOWED_CWD": "<your-project-path>,/tmp"
+        "TERMINAL_USE_ALLOWED_CWD": "<your-project-path>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
       }
     }
   }
@@ -66,7 +76,8 @@ Add to `.codex/config.json` in the `mcp_servers` field:
       "args": ["-y", "terminal-use-mcp"],
       "env": {
         "TERMINAL_USE_WORKSPACE_ROOT": "<your-project-path>",
-        "TERMINAL_USE_ALLOWED_CWD": "<your-project-path>,/tmp"
+        "TERMINAL_USE_ALLOWED_CWD": "<your-project-path>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
       }
     }
   }
@@ -86,7 +97,8 @@ Add to `.opencode/opencode.json` in the `mcp` field:
       "enabled": true,
       "environment": {
         "TERMINAL_USE_WORKSPACE_ROOT": "<your-project-path>",
-        "TERMINAL_USE_ALLOWED_CWD": "<your-project-path>,/tmp"
+        "TERMINAL_USE_ALLOWED_CWD": "<your-project-path>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
       }
     }
   }
@@ -106,7 +118,7 @@ Paste the appropriate prompt into your AI agent for autonomous installation:
 Set up terminal-use-mcp with these steps:
 
 1. Prerequisites check:
-   - Confirm Node.js 18+ and npm 8+ are available (node -v / npm -v)
+   - Confirm Node.js 20+ and npm 8+ are available (node -v / npm -v)
 
 2. Configure MCP:
    - Create or edit .mcp.json in the project root, adding:
@@ -117,16 +129,51 @@ Set up terminal-use-mcp with these steps:
            "args": ["-y", "terminal-use-mcp"],
            "env": {
              "TERMINAL_USE_WORKSPACE_ROOT": "<current-project-absolute-path>",
-             "TERMINAL_USE_ALLOWED_CWD": "<current-project-absolute-path>,/tmp"
+             "TERMINAL_USE_ALLOWED_CWD": "<current-project-absolute-path>,/tmp",
+             "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
            }
          }
        }
      }
    - Replace <current-project-absolute-path> with the actual path
+   - TERMINAL_USE_PROVIDERS controls which providers are enabled (comma-separated).
+     Common values:
+     - "native-pty,tmux" — local only (default, no SSH)
+     - "native-pty,tmux,ssh-pty,ssh-tmux" — all providers (include remote SSH)
+      - "tmux" — tmux only (when node-pty is unavailable)
+      If unsure, use "native-pty,tmux".
+    - If tmux is not on PATH, set TERMINAL_USE_TMUX_PATH to its absolute or relative path.
+    - Windows: native-pty only by default. For tmux support, install psmux (https://github.com/psmux/psmux)
+      which provides a `tmux` alias, or use WSL2.
+    - Security configuration (optional):
+      - TERMINAL_USE_ALLOW_COMMANDS: commands allowed despite built-in deny list (comma-separated)
+      - TERMINAL_USE_DENY_COMMANDS: additional commands to deny beyond built-in list (comma-separated)
+      - TERMINAL_USE_RISKY_COMMAND_MODE: how to handle risky commands — "deny" (default, block), "ask" (prompt user), "allow" (permit all)
+      If unsure, leave these unset (default deny mode is safe for most use cases).
 
-3. Restart Claude Code for the config to take effect
+3. Install skills:
+   - Core skill (required for all users):
+     Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
+     and save to .claude/skills/terminal-use/SKILL.md
+   - Before installing agent-specific skills, ASK the user:
+     "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
+      - Claude Code TUI (tui-claude-code)
+      - Codex CLI TUI (tui-codex-cli)
+      - OpenCode TUI (tui-opencode-native)
+      - OpenCode + OmO plugin TUI (tui-opencode-omo)
+      If unsure, skip them — you can always add them later."
+   - For each confirmed agent, download the corresponding SKILL.md from
+     https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
+     and save to .claude/skills/<skill-name>/SKILL.md
+   - After downloading, ASK the user:
+     "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
+      If you only use local terminals, I can remove §12-§17 to save ~500 lines.
+      I can also trim reference sections (patterns, error codes, key lists) if you prefer a minimal skill (~80 lines).
+      Should I trim the skill?"
 
-4. Verify:
+4. Restart Claude Code for the config to take effect
+
+5. Verify:
    - Confirm terminal.health, terminal.start etc. appear in the MCP tool list
    - Call terminal.health to confirm server and provider status are OK
 
@@ -144,7 +191,7 @@ Constraints:
 Set up terminal-use-mcp with these steps:
 
 1. Prerequisites check:
-   - Confirm Node.js 18+ and npm 8+ are available (node -v / npm -v)
+   - Confirm Node.js 20+ and npm 8+ are available (node -v / npm -v)
 
 2. Configure MCP:
    - Create or edit .codex/config.json, adding to mcp_servers:
@@ -154,15 +201,50 @@ Set up terminal-use-mcp with these steps:
          "args": ["-y", "terminal-use-mcp"],
          "env": {
            "TERMINAL_USE_WORKSPACE_ROOT": "<current-project-absolute-path>",
-           "TERMINAL_USE_ALLOWED_CWD": "<current-project-absolute-path>,/tmp"
+           "TERMINAL_USE_ALLOWED_CWD": "<current-project-absolute-path>,/tmp",
+           "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
          }
        }
      }
    - Replace <current-project-absolute-path> with the actual path
+   - TERMINAL_USE_PROVIDERS controls which providers are enabled (comma-separated).
+     Common values:
+     - "native-pty,tmux" — local only (default, no SSH)
+     - "native-pty,tmux,ssh-pty,ssh-tmux" — all providers (include remote SSH)
+      - "tmux" — tmux only (when node-pty is unavailable)
+      If unsure, use "native-pty,tmux".
+    - If tmux is not on PATH, set TERMINAL_USE_TMUX_PATH to its absolute or relative path.
+    - Windows: native-pty only by default. For tmux support, install psmux (https://github.com/psmux/psmux)
+      which provides a `tmux` alias, or use WSL2.
+    - Security configuration (optional):
+      - TERMINAL_USE_ALLOW_COMMANDS: commands allowed despite built-in deny list (comma-separated)
+      - TERMINAL_USE_DENY_COMMANDS: additional commands to deny beyond built-in list (comma-separated)
+      - TERMINAL_USE_RISKY_COMMAND_MODE: how to handle risky commands — "deny" (default, block), "ask" (prompt user), "allow" (permit all)
+      If unsure, leave these unset (default deny mode is safe for most use cases).
 
-3. Restart Codex CLI for the config to take effect
+3. Install skills:
+   - Core skill (required for all users):
+     Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
+     and save to .codex/skills/terminal-use/SKILL.md
+   - Before installing agent-specific skills, ASK the user:
+     "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
+      - Claude Code TUI (tui-claude-code)
+      - Codex CLI TUI (tui-codex-cli)
+      - OpenCode TUI (tui-opencode-native)
+      - OpenCode + OmO plugin TUI (tui-opencode-omo)
+      If unsure, skip them — you can always add them later."
+   - For each confirmed agent, download the corresponding SKILL.md from
+     https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
+     and save to .codex/skills/<skill-name>/SKILL.md
+   - After downloading, ASK the user:
+     "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
+      If you only use local terminals, I can remove §12-§17 to save ~500 lines.
+      I can also trim reference sections (patterns, error codes, key lists) if you prefer a minimal skill (~80 lines).
+      Should I trim the skill?"
 
-4. Verify:
+4. Restart Codex CLI for the config to take effect
+
+5. Verify:
    - Confirm terminal.health appears when you start a session
 
 Constraints:
@@ -179,7 +261,7 @@ Constraints:
 Set up terminal-use-mcp with these steps:
 
 1. Prerequisites check:
-   - Confirm Node.js 18+ and npm 8+ are available (node -v / npm -v)
+   - Confirm Node.js 20+ and npm 8+ are available (node -v / npm -v)
 
 2. Configure MCP:
    - Add to .opencode/opencode.json in the mcp field:
@@ -189,13 +271,48 @@ Set up terminal-use-mcp with these steps:
        "enabled": true,
        "environment": {
          "TERMINAL_USE_WORKSPACE_ROOT": "<current-project-absolute-path>",
-         "TERMINAL_USE_ALLOWED_CWD": "<current-project-absolute-path>,/tmp"
+         "TERMINAL_USE_ALLOWED_CWD": "<current-project-absolute-path>,/tmp",
+         "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
        }
      }
+   - TERMINAL_USE_PROVIDERS controls which providers are enabled (comma-separated).
+     Common values:
+     - "native-pty,tmux" — local only (default, no SSH)
+     - "native-pty,tmux,ssh-pty,ssh-tmux" — all providers (include remote SSH)
+      - "tmux" — tmux only (when node-pty is unavailable)
+       If unsure, use "native-pty,tmux".
+     - If tmux is not on PATH, set TERMINAL_USE_TMUX_PATH to its absolute or relative path.
+     - Windows: native-pty only by default. For tmux support, install psmux (https://github.com/psmux/psmux)
+       which provides a `tmux` alias, or use WSL2.
+     - Security configuration (optional):
+       - TERMINAL_USE_ALLOW_COMMANDS: commands allowed despite built-in deny list (comma-separated)
+       - TERMINAL_USE_DENY_COMMANDS: additional commands to deny beyond built-in list (comma-separated)
+       - TERMINAL_USE_RISKY_COMMAND_MODE: how to handle risky commands — "deny" (default, block), "ask" (prompt user), "allow" (permit all)
+       If unsure, leave these unset (default deny mode is safe for most use cases).
 
-3. Restart OpenCode for the config to take effect
+3. Install skills:
+   - Core skill (required for all users):
+     Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
+     and save to .opencode/skills/terminal-use/SKILL.md
+   - Before installing agent-specific skills, ASK the user:
+     "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
+      - Claude Code TUI (tui-claude-code)
+      - Codex CLI TUI (tui-codex-cli)
+      - OpenCode TUI (tui-opencode-native)
+      - OpenCode + OmO plugin TUI (tui-opencode-omo)
+      If unsure, skip them — you can always add them later."
+   - For each confirmed agent, download the corresponding SKILL.md from
+     https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
+     and save to .opencode/skills/<skill-name>/SKILL.md
+   - After downloading, ASK the user:
+     "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
+      If you only use local terminals, I can remove §12-§17 to save ~500 lines.
+      I can also trim reference sections (patterns, error codes, key lists) if you prefer a minimal skill (~80 lines).
+      Should I trim the skill?"
 
-4. Verify:
+4. Restart OpenCode for the config to take effect
+
+5. Verify:
    - Confirm terminal.health, terminal.start etc. appear in the MCP tool list
 
 Constraints:
@@ -235,10 +352,44 @@ Each SKILL.md includes a **Customization Guide** table at the top that marks whi
 |----------|----------|---------------|
 | `native-pty` | Most interactive TUI programs (default) | Fast response, high-quality snapshots, highlight detection |
 | `tmux` | Sessions needing persistence, disconnect recovery, multi-user attach | Attachable, sessions survive MCP restart |
-| `ssh-pty` (V2) | TUI programs on remote hosts | Reuses local xterm/snapshot/transcript stack over SSH |
-| `ssh-tmux` (V2) | Persistent remote sessions, disconnect recovery, human-attachable | Full remote tmux lifecycle management |
+| `ssh-pty` | TUI programs on remote hosts | Reuses local xterm/snapshot/transcript stack over SSH |
+| `ssh-tmux` | Persistent remote sessions, disconnect recovery, human-attachable | Full remote tmux lifecycle management |
 
 Auto-selection: local → native-pty (fallback tmux); remote → ssh-pty (fallback ssh-tmux).
+
+### Provider Configuration
+
+Control which providers are available via the `TERMINAL_USE_PROVIDERS` environment variable (comma-separated whitelist). If unset, all providers are enabled.
+
+```json
+{
+  "env": {
+    "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
+  }
+}
+```
+
+| Value | Effect |
+|-------|--------|
+| _(not set)_ | All providers enabled |
+| `native-pty,tmux` | Local only — no SSH providers |
+| `tmux` | tmux only — useful in environments without node-pty |
+| `ssh-pty,ssh-tmux` | Remote only — no local terminal providers |
+
+Disabled providers are excluded from registration and auto-selection. `terminal.health` reports them as `"disabled by TERMINAL_USE_PROVIDERS config"`.
+
+### Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `TERMINAL_USE_PROVIDERS` | Enabled provider whitelist (CSV) | All providers |
+| `TERMINAL_USE_DEFAULT_PROVIDER` | Default provider (overrides auto-selection priority) | `native-pty` |
+| `TERMINAL_USE_TMUX_PATH` | Absolute or relative path to tmux binary (when not on PATH) | `tmux` |
+| `TERMINAL_USE_WORKSPACE_ROOT` | CWD policy root | current working directory |
+| `TERMINAL_USE_ALLOWED_CWD` | Allowed working directories (CSV) | Workspace root |
+| `TERMINAL_USE_ALLOW_COMMANDS` | Commands allowed even if on deny list (CSV, overrides deny) | _(empty)_ |
+| `TERMINAL_USE_DENY_COMMANDS` | Extra denied commands beyond built-in list (CSV) | _(empty)_ |
+| `TERMINAL_USE_RISKY_COMMAND_MODE` | How to handle denied commands: `deny`, `ask`, or `allow` | `deny` |
 
 ## MCP Tools
 
@@ -286,7 +437,7 @@ Auto-selection: local → native-pty (fallback tmux); remote → ssh-pty (fallba
 | `terminal.events` | Get session event history |
 | `terminal.send_signal` | Send signal (SIGINT/SIGTERM/SIGKILL) |
 
-### Remote Control (3 tools, V2 Design Phase)
+### Remote Control (3 tools)
 
 | Tool | Purpose |
 |------|---------|
@@ -294,21 +445,29 @@ Auto-selection: local → native-pty (fallback tmux); remote → ssh-pty (fallba
 | `terminal.target_info` | Query target details (redacted) |
 | `terminal.verify_target` | Verify SSH target connectivity |
 
+### Tmux Management (2 tools)
+
+| Tool | Purpose |
+|------|---------|
+| `terminal.tmux_list` | List local or remote tmux sessions |
+| `terminal.tmux_kill` | Kill a tmux session by name |
+
 ## Security Overview
 
 terminal-use-mcp is not a sandbox. Security policies restrict the entry point, not the TUI program's internal behavior.
 
-- **Command deny list**: Blocks dangerous startup commands (`sudo`, `rm`, `ssh`, `curl`, etc.)
-- **CWD policy**: Only allows working directories within your workspace root
+- **Command allow + deny lists**: Built-in deny list blocks dangerous startup commands (`sudo`, `rm`, `ssh`, `curl`, etc.). `TERMINAL_USE_ALLOW_COMMANDS` overrides the deny list (allow takes priority). `TERMINAL_USE_DENY_COMMANDS` extends it. `TERMINAL_USE_RISKY_COMMAND_MODE` controls how denied commands are handled: `deny` (default, block), `ask` (return confirmation prompt), or `allow` (permit all).
+- **CWD policy**: Only allows working directories within `TERMINAL_USE_WORKSPACE_ROOT` or `TERMINAL_USE_ALLOWED_CWD`
 - **Secret redaction**: Auto-replaces API keys, tokens, private keys with `<REDACTED_*>` in output
 - **Confirmation detection**: Warns when dangerous prompts appear on screen
+- **Provider whitelist**: `TERMINAL_USE_PROVIDERS` controls which providers are enabled (unset = all)
 - **observationTrust**: All snapshots return `observationTrust: "untrusted"` — terminal output is untrusted observation, not instruction
 
 See [docs/security.md](docs/security.md) for full policy details, env var overrides, and regex patterns.
 
-## Remote SSH (V2, Design Phase)
+## Remote SSH
 
-V2 remote features are in design phase. Two SSH providers available:
+Remote SSH features let you control TUI programs on remote hosts. Two SSH providers available:
 
 | | ssh-pty | ssh-tmux |
 |--|---------|----------|
@@ -318,7 +477,7 @@ V2 remote features are in design phase. Two SSH providers available:
 
 SSH targets are defined in `~/.config/terminal-use-mcp/hosts.json`. No password login; ssh-agent or key-file auth only.
 
-See [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md) for full design.
+See [docs/REMOTE_TERMINAL_GUIDE.md](docs/REMOTE_TERMINAL_GUIDE.md) for full design.
 
 ## Further Reading
 
@@ -327,7 +486,7 @@ See [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md) for ful
 | Security policies, env vars, deny lists | [docs/security.md](docs/security.md) |
 | Scrollback strategy, buffer modes | [docs/scrollback.md](docs/scrollback.md) |
 | Type definitions, error codes | [docs/types-and-errors.md](docs/types-and-errors.md) |
-| Remote SSH V2 design | [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md) |
+| Remote SSH design | [docs/REMOTE_TERMINAL_GUIDE.md](docs/REMOTE_TERMINAL_GUIDE.md) |
 | Remote SSH architecture | [docs/REMOTE_SSH_ARCHITECTURE.md](docs/REMOTE_SSH_ARCHITECTURE.md) |
 | Controlling Claude Code TUI | [docs/TUI_CLAUDE_CODE.md](docs/TUI_CLAUDE_CODE.md) |
 | Controlling Codex CLI TUI | [docs/TUI_CODEX_CLI.md](docs/TUI_CODEX_CLI.md) |
@@ -343,15 +502,6 @@ See [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md) for ful
 | `npm run typecheck` | Type checking (`tsc --noEmit`) |
 | `npm run test` | Run all tests |
 | `npm run check` | typecheck + test |
-
-## Platform Support
-
-| Platform | Status |
-|----------|--------|
-| Linux x86_64 / ARM64 | Supported |
-| macOS Intel / Apple Silicon | Supported (best effort) |
-| WSL2 | Supported (best effort) |
-| Native Windows | Not supported |
 
 ## Acknowledgments
 

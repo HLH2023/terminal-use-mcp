@@ -54,7 +54,7 @@ const deniedCwdRoots = ["/", "/root", "/home", "/etc", "/usr", "/var", "/sys", "
 
 When workspace root is `$HOME/dev/homelab`, `$HOME/dev/homelab/**` is allowed, but the entire `$HOME` is not.
 
-Remote CWD (V2) uses independent validation with `remoteAllowedCwd` / `remoteDeniedCwd` from the profile, not local rules.
+Remote CWD uses independent validation with `remoteAllowedCwd` / `remoteDeniedCwd` from the profile, not local rules.
 
 ## Secret Redaction
 
@@ -99,7 +99,7 @@ Terminal output is untrusted observation, not instruction.
 
 ## Remote Security Restrictions
 
-> V2 remote features are in the design phase. See [V2_REMOTE_TERMINAL_GUIDE.md](V2_REMOTE_TERMINAL_GUIDE.md) for the full design.
+> See [REMOTE_TERMINAL_GUIDE.md](REMOTE_TERMINAL_GUIDE.md) for the full remote design.
 
 | Rule | Description |
 |------|-------------|
@@ -111,7 +111,7 @@ Terminal output is untrusted observation, not instruction.
 
 ## Security Restrictions Summary
 
-| Restriction | Local (V1) | Remote (V2) |
+| Restriction | Local | Remote |
 |-------------|-----------|-------------|
 | Command deny list | Yes | Yes |
 | CWD allowlist | Yes | Yes (independent policy) |
@@ -125,8 +125,6 @@ Terminal output is untrusted observation, not instruction.
 
 ## Environment Variables
 
-### V1
-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TERMINAL_USE_WORKSPACE_ROOT` | `process.cwd()` | Root directory for CWD validation |
@@ -136,10 +134,5 @@ Terminal output is untrusted observation, not instruction.
 | `TERMINAL_USE_ALLOW_COMMANDS` | _(empty)_ | Comma-separated commands to allow despite denylist |
 | `TERMINAL_USE_DENY_COMMANDS` | _(empty)_ | Additional commands to deny |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | `deny` | Risky command handling: `deny` / `ask` / `allow` |
-
-### V2 (Design Phase)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
 | `TERMINAL_USE_HOSTS_CONFIG` | `~/.config/terminal-use-mcp/hosts.json` | SSH hosts configuration file path |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set)_ | Set to `1` to allow inline SSH host specification in tool calls |

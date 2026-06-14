@@ -7,7 +7,7 @@
 - [TerminalSnapshot](#terminalsnapshot)
 - [ToolError](#toolerror)
 - [TerminalUseErrorCode](#terminaluseerrorcode)
-- [TerminalTarget (V2, Design Phase)](#terminaltarget-v2-design-phase)
+- [TerminalTarget](#terminaltarget)
 
 ## TerminalSnapshot
 
@@ -76,7 +76,7 @@ type TerminalUseErrorCode =
   | "INVALID_MOUSE_COORDS"
   | "INVALID_KEY"
   | "INTERNAL_ERROR"
-  // V2 additions (design phase)
+  // Remote error codes
   | "SSH_PROFILE_NOT_FOUND"
   | "SSH_HOST_KEY_MISMATCH"
   | "SSH_HOST_KEY_UNKNOWN"
@@ -89,7 +89,7 @@ type TerminalUseErrorCode =
   | "REMOTE_COMMAND_DENIED"
 ```
 
-## TerminalTarget (V2, Design Phase)
+## TerminalTarget
 
 ```ts
 type TerminalTarget =
@@ -113,4 +113,4 @@ type SshAuthRef =
   | { type: "key-file"; path: string; passphraseEnv?: string }
 ```
 
-`{ type: "password" }` is prohibited. V2 does not support password login.
+`{ type: "password" }` is prohibited. Password login is not supported.

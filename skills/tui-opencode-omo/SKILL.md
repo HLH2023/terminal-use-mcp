@@ -1,128 +1,294 @@
 # tui-opencode-omo: Control OpenCode + OmO TUI
 
-> This skill is useful when one AI agent needs to remotely control an OpenCode + Oh My OpenAgent TUI session via terminal-use-mcp. It **layers on top of** `tui-opencode-native` — if you install both, note that the `Tab` key behaves differently: in native OpenCode it switches agents (Build/Plan), while in OmO it enters Prometheus planning mode.
+> This skill is optional. Only install if you need to control this agent's TUI via terminal-use-mcp.
 
-> **This skill is optional.** Only install if you need to control this agent's TUI via terminal-use-mcp. You can freely trim or remove sections you don't need — every section is self-contained.
+> This skill is useful when one AI agent needs to remotely control an OpenCode + Oh My OpenAgent TUI session via terminal-use-mcp. It is self-contained and includes the full vanilla OpenCode controls plus OmO-specific additions.
 
-通过 terminal-use-mcp 控制 OpenCode + Oh My OpenAgent 插件 TUI 的操作技能。在原生 OpenCode 操作基础上，增加 OmO 专属的 Tab/Prometheus、ultrawork 循环、团队模式等能力。
+Operational skill for controlling OpenCode with the Oh My OpenAgent plugin through terminal-use-mcp. Includes complete vanilla OpenCode key mappings, command dialog behavior, interaction flows, plus OmO-specific Tab/Prometheus, ultrawork loop, and Team Mode capabilities.
 
-## 何时使用
+## When To Use
 
-- 需要通过 terminal-use-mcp 控制**安装了 Oh My OpenAgent 插件的 OpenCode** TUI
-- 需要使用 Prometheus 计划模式、ultrawork 循环、团队模式
-- 需要触发 OmO 专属的斜杠命令或关键词模式
-- 原生 OpenCode 操作参见 `tui-opencode-native` 技能
+- You need to control an OpenCode TUI with the Oh My OpenAgent plugin installed through terminal-use-mcp.
+- You need all vanilla OpenCode controls plus OmO-specific behavior in a single installed skill.
+- You need Prometheus planning mode, ultrawork loop, or Team Mode.
+- You need to trigger OmO-specific slash commands or keyword modes.
 
-## 与原生 OpenCode 的关系
+## Relationship To Native OpenCode
 
-本技能**叠加**在 `tui-opencode-native` 之上。所有原生快捷键（Ctrl+K、Ctrl+S、Ctrl+O 等）依然适用。
-本技能只记录 OmO **新增或修改**的交互。
+This skill is self-contained. It includes the full vanilla OpenCode TUI controls below: global keys, chat/editor keys, dialogs, command system, scrolling, help panel, and common examples.
 
-## 核心差异
+It also records OmO additions and behavior changes. A user who installs only `tui-opencode-omo` has enough information to control OpenCode with OmO.
 
-### Tab 键 → Prometheus 模式
+The key behavior change is `Tab`: in vanilla OpenCode, Tab switches agents such as Build/Plan; in OmO, Tab enters Prometheus planning mode when not editing.
 
-OmO 将 `Tab` 键映射为进入 Prometheus 计划模式的入口：
+## Core Operation Flow
 
-```
-terminal.press("tab")              # 进入 Prometheus 模式
-terminal.type("你的计划需求")       # 输入计划描述
-terminal.press("enter")            # 提交给 Prometheus
-```
-
-**注意**：原生 OpenCode 的 Tab 用于切换代理（Build/Plan），OmO 的 Tab 在非编辑状态下进入 Prometheus。
-
-### 自然语言关键词（非斜杠命令）
-
-以下关键词直接在聊天输入中生效，不需要 `/` 前缀：
-
-| 关键词 | 功能 |
-|--------|------|
-| `ultrawork` 或 `ulw` | 进入 ultrawork 深度工作模式 |
-| `search` | 触发搜索 |
-| `analyze` | 触发分析 |
-| `team` | 触发团队模式 |
-| `hyperplan` | 触发超规划 |
-| `hyperplan ultrawork` | 超规划 + 深度工作组合 |
-
-## OmO 专属斜杠命令
-
-| 命令 | 功能 |
-|------|------|
-| `/init-deep` | 初始化 AGENTS.md 知识库 |
-| `/start-work` | 从 Prometheus 计划开始工作 |
-| `/ralph-loop` | 启动自指开发循环 |
-| `/ulw-loop` | 启动 ultrawork 循环 |
-| `/cancel-ralph` | 取消活跃的 Ralph 循环 |
-| `/stop-continuation` | 停止所有延续机制 |
-| `/refactor` | 智能重构命令 |
-| `/handoff` | 创建上下文接力提示词 |
-| `/remove-ai-slops` | 移除 AI 代码坏味道 |
-| `/hyperplan` | 对抗性多智能体规划 |
-
-## 团队模式（Team Mode）
-
-启用后新增功能：
-- `team_*` 工具簇（12 个团队协作工具）
-- tmux 可视化窗口显示每个成员输出
-- 子代理并行执行
-
-**操作**：在聊天中输入 `team` 关键词或使用 `/start-work` 后选择团队模式。
-
-## 运行时注入的 MCP
-
-以下 MCP 由插件运行时注入，`opencode mcp list` 看不到：
-- `websearch` / `exa` — 网页搜索
-- `context7` — 文档查询
-- `grep_app` — GitHub 代码搜索
-
-需用 `doctor --verbose` 查看。
-
-## 完整操作流程示例
-
-### Prometheus 计划 → ultrawork 执行
+### Start And Readiness Check
 
 ```
-# 1. 启动 OpenCode
+1. terminal.start(command="opencode", cwd="~/project")
+2. terminal.wait_stable(idleMs=5000, timeoutMs=15000)
+3. terminal.find("Ask|Sisyphus|Welcome")  # Confirm the UI has finished rendering
+```
+
+### Send A Message
+
+```
+terminal.type("your question")
+terminal.press("enter")
+terminal.wait_stable(idleMs=15000, timeoutMs=120000)
+```
+
+### Exit
+
+```
+terminal.press("ctrl+c")  # Exit
+```
+
+## Global Keybindings (Source-Verified, Not README)
+
+> Warning: README documentation differs from source code. README says Ctrl+A switches sessions, Ctrl+X cancels, and i focuses the editor.
+> The source code actually uses Ctrl+S for session switching, Esc for cancellation, and i only for manual path input in the file picker.
+> The table below follows the source code.
+
+| Key | Function | Notes |
+|-----|----------|-------|
+| `ctrl+c` | Exit | Press twice to force exit |
+| `ctrl+l` | Log page | Open log viewer |
+| `ctrl+s` | Session switcher | Warning: conflicts with editor send key; global layer intercepts first |
+| `ctrl+k` | Command dialog | Open command picker |
+| `ctrl+o` | Model picker | Switch model/provider |
+| `ctrl+f` | File picker | Select file |
+| `ctrl+t` | Theme switcher | Switch theme |
+| `ctrl+?` / `ctrl+h` / `ctrl+_` | Help panel | Show key overview |
+| `escape` | Close current overlay | Return to previous layer |
+
+## Chat / Editor Keybindings
+
+| Key | Function |
+|-----|----------|
+| `ctrl+n` | Create/clear current session |
+| `escape` | Interrupt current generation / cancel |
+| `enter` | Send message |
+| `ctrl+s` | Send message; conflicts with global session switcher, not recommended |
+| `ctrl+e` | Open external editor |
+| `@` | Open completion popup |
+| `ctrl+r` | Enter attachment deletion mode |
+
+### Attachment Deletion Mode
+
+| Key | Function |
+|-----|----------|
+| `r` | Delete all attachments |
+| `0`-`9` | Delete attachment by number |
+| `escape` | Exit deletion mode |
+
+## Session / Model / Theme Dialogs
+
+| Dialog | Navigation | Select | Close |
+|--------|------------|--------|-------|
+| Session switcher | `up`/`down` or `j`/`k` | `enter` | `escape` |
+| Model switcher | `up`/`down` or `j`/`k` | `enter` | `escape` |
+| Provider switcher | `left`/`right` or `h`/`l` | `enter` | `escape` |
+| Theme switcher | `up`/`down` or `j`/`k` | `enter` | `escape` |
+
+## Permission Modal
+
+| Key | Function |
+|-----|----------|
+| `left`/`right` or `tab` | Switch option |
+| `enter`/`space` | Confirm |
+| `a` | Allow |
+| `s` | Allow for this session |
+| `d` | Deny |
+
+## Exit Confirmation Modal
+
+| Key | Function |
+|-----|----------|
+| `left`/`right` or `tab` | Switch Yes/No |
+| `enter`/`space` | Confirm |
+| `y`/`Y` | Yes |
+| `n`/`N` | No |
+
+## Command System
+
+OpenCode does not have TUI slash commands such as `/session` or `/help`. The command entry point is the command dialog opened with `Ctrl+K`.
+
+Built-in commands are only two:
+- `init` - initialize the project.
+- `compact` - compact the current session.
+
+Custom command sources:
+- `$XDG_CONFIG_HOME/opencode/commands`
+- `$HOME/.opencode/commands`
+- `<data>/commands`
+
+Command ID format: `user:*` / `project:*`
+
+Commands with `$NAME` placeholders first open a multi-parameter dialog, then execute.
+
+## Message Scrolling
+
+| Key | Function |
+|-----|----------|
+| `pageup`/`pagedown` | Page up/down |
+| `ctrl+u`/`ctrl+d` | Half-page scroll |
+
+## Reading Long Conversations
+
+OpenCode uses an Ink TUI with the alt buffer, so terminal scrollback is 0.
+
+**Recommended method**:
+1. `mouse_scroll(direction="up")` - scroll conversation history upward with the mouse wheel.
+2. `snapshot()` - read the current visible viewport.
+3. `find(pattern, {includeScrollback: true})` - search the full xterm buffer when native-pty is available.
+4. `mouse_scroll(direction="down")` - scroll back to the bottom before continuing.
+
+**Note**: The native-pty provider can search full scrollback with `find`; the tmux provider searches content captured by `capture-pane`.
+
+## Help Panel
+
+The help panel opened with `Ctrl+?` aggregates these keys:
+- Global keys.
+- Current page keys.
+- Current overlay keys.
+- Log page return key.
+
+This is the final visible keybinding overview inside the TUI.
+
+## Common Operation Examples
+
+### Switch Model
+
+```
+terminal.press("ctrl+o")           # Open model picker
+terminal.press("down")             # Move down
+terminal.type("sonnet")            # Filter
+terminal.press("enter")            # Select
+```
+
+### Switch Session
+
+```
+terminal.press("ctrl+s")           # Open session switcher
+terminal.press("j")                # Move down
+terminal.press("enter")            # Select
+```
+
+### Execute Command
+
+```
+terminal.press("ctrl+k")           # Open command dialog
+terminal.type("compact")           # Type command
+terminal.press("enter")            # Execute
+```
+
+## OmO-Specific Differences
+
+### Tab Key -> Prometheus Mode
+
+OmO maps `Tab` to the entry point for Prometheus planning mode:
+
+```
+terminal.press("tab")              # Enter Prometheus mode
+terminal.type("your planning request")
+terminal.press("enter")            # Submit to Prometheus
+```
+
+**Note**: Vanilla OpenCode uses Tab to switch agents such as Build/Plan. In OmO, Tab enters Prometheus when not editing.
+
+### Natural-Language Keywords (Not Slash Commands)
+
+The following keywords work directly in chat input and do not require a `/` prefix:
+
+| Keyword | Function |
+|---------|----------|
+| `ultrawork` or `ulw` | Enter ultrawork deep work mode |
+| `search` | Trigger search |
+| `analyze` | Trigger analysis |
+| `team` | Trigger Team Mode |
+| `hyperplan` | Trigger hyperplanning |
+| `hyperplan ultrawork` | Combine hyperplanning with deep work |
+
+## OmO-Specific Slash Commands
+
+| Command | Function |
+|---------|----------|
+| `/init-deep` | Initialize AGENTS.md knowledge base |
+| `/start-work` | Start work from a Prometheus plan |
+| `/ralph-loop` | Start self-referential development loop |
+| `/ulw-loop` | Start ultrawork loop |
+| `/cancel-ralph` | Cancel active Ralph loop |
+| `/stop-continuation` | Stop all continuation mechanisms |
+| `/refactor` | Intelligent refactoring command |
+| `/handoff` | Create a context handoff prompt |
+| `/remove-ai-slops` | Remove AI code smells |
+| `/hyperplan` | Adversarial multi-agent planning |
+
+## Team Mode
+
+When enabled, Team Mode adds:
+- The `team_*` tool family with 12 team collaboration tools.
+- tmux visualization windows that show each member's output.
+- Parallel subagent execution.
+
+**Operation**: Type the `team` keyword in chat or use `/start-work`, then choose Team Mode.
+
+## Runtime-Injected MCPs
+
+The following MCPs are injected by the plugin runtime and do not appear in `opencode mcp list`:
+- `websearch` / `exa` - web search.
+- `context7` - documentation lookup.
+- `grep_app` - GitHub code search.
+
+Use `doctor --verbose` to inspect them.
+
+## Complete Operation Flow Examples
+
+### Prometheus Plan -> Ultrawork Execution
+
+```
+# 1. Start OpenCode
 terminal.start(command="opencode", cwd="~/project")
 terminal.wait_stable(idleMs=5000, timeoutMs=15000)
 
-# 2. 进入 Prometheus 模式
-terminal.press("tab")                    # Tab 进入 Prometheus
-terminal.type("实现用户认证模块")
-terminal.press("enter")                  # 提交
-terminal.wait_stable(idleMs=15000, timeoutMs=60000)  # 等待计划
+# 2. Enter Prometheus mode
+terminal.press("tab")                    # Tab enters Prometheus
+terminal.type("implement user authentication module")
+terminal.press("enter")                  # Submit
+terminal.wait_stable(idleMs=15000, timeoutMs=60000)  # Wait for the plan
 
-# 3. 审查并确认计划后，开始 ultrawork
+# 3. After reviewing and confirming the plan, start ultrawork
 terminal.type("ultrawork")
 terminal.press("enter")
 terminal.wait_stable(idleMs=30000, timeoutMs=120000)
 
-# 4. 读取结果
+# 4. Read the result
 terminal.snapshot(mode="viewport")
-terminal.find("完成", {includeScrollback: true})
+terminal.find("done|complete|finished", {includeScrollback: true})
 
-# 5. 退出
+# 5. Exit
 terminal.press("ctrl+c")
 ```
 
-### 使用 ralph-loop 自主循环
+### Use ralph-loop Autonomous Loop
 
 ```
-terminal.press("ctrl+k")                 # 命令面板
-terminal.type("ralph-loop")               # 输入命令
-terminal.press("enter")                  # 执行
-terminal.wait_stable(idleMs=30000, timeoutMs=180000)  # 等待循环完成
+terminal.press("ctrl+k")                 # Command panel
+terminal.type("ralph-loop")              # Type command
+terminal.press("enter")                  # Execute
+terminal.wait_stable(idleMs=30000, timeoutMs=180000)  # Wait for loop completion
 
-# 完成后查看结果
-terminal.find("完成", {includeScrollback: true})
+# Check result after completion
+terminal.find("done|complete|finished", {includeScrollback: true})
 ```
 
-## 注意事项
+## Notes
 
-1. **Tab 键行为变化**：OmO 中 Tab 用于 Prometheus 模式，不再仅用于代理切换
-2. **命令面板仍然可用**：Ctrl+K 仍然打开原生命令面板，OmO 命令也会出现在其中
-3. **团队模式需要 tmux**：Team Mode 的多窗口可视化依赖 tmux
-4. **运行时 MCP 不可见**：插件注入的 MCP 在 `opencode mcp list` 中不显示，要用 `doctor --verbose`
+1. **Tab behavior change**: In OmO, Tab enters Prometheus mode instead of only switching agents.
+2. **Command panel still works**: Ctrl+K still opens the native command panel, and OmO commands also appear there.
+3. **Team Mode requires tmux**: Team Mode's multi-window visualization depends on tmux.
+4. **Runtime MCPs are not visible in `opencode mcp list`**: Plugin-injected MCPs require `doctor --verbose`.
 
 > For the base terminal control skill, see [terminal-use](../terminal-use/SKILL.md).

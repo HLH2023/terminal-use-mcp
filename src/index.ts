@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   /* 创建 SessionManager 并注册所有已知 provider；
    * 各 provider 的 isAvailable() 会在首次使用时异步检测。 */
   const sm = new SessionManager(config, logger)
-  createAndRegisterProviders(sm, logger)
+  createAndRegisterProviders(sm, logger, config.enabledProviders)
   if (sm.getProviders().size === 0) {
     logger.error("no terminal providers available")
     process.exit(1)

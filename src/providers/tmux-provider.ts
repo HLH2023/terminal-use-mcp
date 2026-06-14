@@ -41,6 +41,10 @@ const DEFAULT_TTL_MS = 60 * 60 * 1000
 const LINE_PASTE_DELAY_MS = 5
 const LIST_SEPARATOR = "\t"
 
+function getTmuxBin(): string {
+  return process.env.TERMINAL_USE_TMUX_PATH ?? "tmux"
+}
+
 const TMUX_CAPABILITIES: ProviderCapabilities = {
   provider: "tmux",
   supportsStart: true,
@@ -576,7 +580,7 @@ export class TmuxProvider implements TerminalProvider {
 
   private async execTmux(args: string[]): Promise<ExecTmuxResult> {
     return new Promise((resolve, reject) => {
-      execFile("tmux", args, { timeout: TMUX_EXEC_TIMEOUT_MS }, (error, stdout, stderr) => {
+      execFile(getTmuxBin(), args, { timeout: TMUX_EXEC_TIMEOUT_MS }, (error, stdout, stderr) => {
         if (error) {
           reject(error)
           return
@@ -590,7 +594,7 @@ export class TmuxProvider implements TerminalProvider {
   private async ensureTmuxAvailable(): Promise<void> {
     const available = await this.isAvailable()
     if (!available) {
-      throw new DependencyMissingError("tmux", "Install tmux 3.4+ and ensure it is available on PATH")
+      throw new DependencyMissingError("tmux", "Install tmux 3.2+ or set TERMINAL_USE_TMUX_PATH to a tmux-compatible binary (e.g. psmux on Windows)")
     }
   }
 

@@ -2,7 +2,7 @@
 
 演示如何使用 `ssh-pty` provider 连接远程主机，启动 Claude Code CLI，发送任务并通过 riskSignals 监控权限请求。
 
-> V2 远程功能处于设计阶段，尚未实现。完整设计参见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](../docs/V2_REMOTE_TERMINAL_GUIDE.md)。
+> Remote SSH features are available. Full design: [REMOTE_TERMINAL_GUIDE.md](../docs/REMOTE_TERMINAL_GUIDE.md).
 
 > 安全关键: 远程 Claude Code 中的 "Allow command?" / "Apply changes?" 等提示绝不能自动批准。必须 STOP 并询问用户。
 

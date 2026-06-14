@@ -6,6 +6,15 @@
 
 [![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
 
+| 平台 | 状态 |
+|------|------|
+| Linux x86_64 / ARM64 | 支持 |
+| macOS Intel / Apple Silicon | 支持（尽力而为） |
+| WSL2 | 支持（尽力而为） |
+| 原生 Windows | 实验性（仅 native-pty；tmux 需要 [psmux](https://github.com/psmux/psmux) 或 WSL2） |
+
+> **Windows 用户**：`native-pty` provider 在 Windows 上可用（自动检测 shell：`ComSpec` → `cmd.exe`）。`tmux` provider 依赖 Unix PTY 多路复用器 — 安装 [psmux](https://github.com/psmux/psmux)（tmux 兼容，支持 83 个命令，使用 `tmux` 作为别名）或使用 WSL2。若 `tmux` 不在 PATH 上，可通过 `TERMINAL_USE_TMUX_PATH` 设置其绝对或相对路径。
+
 这不是 shell 执行器。简单命令请用 bash 工具。本服务器处理需要键盘交互的 TUI 程序：lazygit、vim、htop、Python REPL、调试器、安装向导、外部代理 TUI（Claude Code、Codex CLI、OpenCode）。
 
 ## 基本概念
@@ -28,7 +37,7 @@ snapshot → 分析 → type/press → wait → snapshot
 
 | 依赖 | 最低版本 | 用途 |
 |------|----------|------|
-| Node.js | 18+ | 运行 MCP 服务器 |
+| Node.js | 20+ | 运行 MCP 服务器 |
 | npm | 8+ | 安装依赖 |
 | node-gyp + C++ 工具链 | — | 编译 node-pty（可选；缺失时 fallback 到 tmux） |
 | tmux | 3.2+ | tmux 提供者（可选；缺失时仅有 native-pty） |
@@ -47,7 +56,8 @@ snapshot → 分析 → type/press → wait → snapshot
       "args": ["-y", "terminal-use-mcp"],
       "env": {
         "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目路径>",
-        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp"
+        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
       }
     }
   }
@@ -66,7 +76,8 @@ snapshot → 分析 → type/press → wait → snapshot
       "args": ["-y", "terminal-use-mcp"],
       "env": {
         "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目路径>",
-        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp"
+        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
       }
     }
   }
@@ -86,7 +97,8 @@ snapshot → 分析 → type/press → wait → snapshot
       "enabled": true,
       "environment": {
         "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目路径>",
-        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp"
+        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
       }
     }
   }
@@ -105,25 +117,60 @@ stdio 传输：stdout 保留给 MCP 协议，所有日志输出到 stderr。SIGI
 ```
 安装 terminal-use-mcp：
 
-1. 检查 Node.js 18+ 和 npm 8+ 是否可用
+1. 检查 Node.js 20+ 和 npm 8+ 是否可用
 
 2. 在项目根目录创建或编辑 .mcp.json，添加：
-   {
-     "mcpServers": {
-       "terminal-use": {
-         "command": "npx",
-         "args": ["-y", "terminal-use-mcp"],
-         "env": {
-           "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
-           "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
-         }
-       }
-     }
-   }
+    {
+      "mcpServers": {
+        "terminal-use": {
+          "command": "npx",
+          "args": ["-y", "terminal-use-mcp"],
+          "env": {
+            "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
+            "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp",
+            "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
+          }
+        }
+      }
+    }
+   - TERMINAL_USE_PROVIDERS 控制启用的 provider（逗号分隔）。
+     常用值：
+     - "native-pty,tmux" — 仅本地（默认，不含 SSH）
+     - "native-pty,tmux,ssh-pty,ssh-tmux" — 全部 provider（含远程 SSH）
+     - "tmux" — 仅 tmux（node-pty 不可用时）
+      如果不确定，使用 "native-pty,tmux"。
+   - 若 tmux 不在 PATH 上，通过 TERMINAL_USE_TMUX_PATH 设置其绝对或相对路径。
+    - Windows：默认仅 native-pty。如需 tmux 支持，安装 psmux（https://github.com/psmux/psmux）
+      其提供 `tmux` 别名，或使用 WSL2。
+    - 安全配置（可选）：
+      - TERMINAL_USE_ALLOW_COMMANDS：允许命令白名单，覆盖内置黑名单（逗号分隔）
+      - TERMINAL_USE_DENY_COMMANDS：额外拒绝命令列表，补充内置黑名单（逗号分隔）
+      - TERMINAL_USE_RISKY_COMMAND_MODE：风险命令处理方式 — "deny"（默认，阻止）、"ask"（提示用户确认）、"allow"（允许全部）
+      如果不确定，保持默认即可（deny 模式对大多数场景是安全的）。
 
-3. 重启 Claude Code 使配置生效
+3. 安装 skills：
+   - 核心 skill（所有用户必需）：
+     下载 https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
+     保存到 .claude/skills/terminal-use/SKILL.md
+   - 安装代理专属 skill 前，向用户提问：
+     "你需要通过 terminal-use-mcp 远程控制以下哪个 AI 代理 TUI？
+      - Claude Code TUI (tui-claude-code)
+      - Codex CLI TUI (tui-codex-cli)
+      - OpenCode TUI (tui-opencode-native)
+      - OpenCode + OmO 插件 TUI (tui-opencode-omo)
+      如果不确定，先跳过 — 随时可以添加。"
+   - 对用户确认的每个代理，从
+     https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
+     下载并保存到 .claude/skills/<skill-name>/SKILL.md
+   - 下载完成后，向用户提问：
+     "核心 skill 包含本地（§1-§11）和远程 SSH（§12-§17）两部分。
+      如果你只使用本地终端，我可以删除 §12-§17 以节省约 500 行。
+      我也可以裁剪参考章节（模式示例、错误码、键名列表），保留最小 skill（约 80 行）。
+      需要我裁剪吗？"
 
-4. 验证：确认 terminal.health 等工具出现在 MCP 工具列表中
+4. 重启 Claude Code 使配置生效
+
+5. 验证：确认 terminal.health 等工具出现在 MCP 工具列表中
 
 约束：不要输出任何密钥；node-pty 编译失败才通知我
 ```
@@ -136,23 +183,58 @@ stdio 传输：stdout 保留给 MCP 协议，所有日志输出到 stderr。SIGI
 ```
 安装 terminal-use-mcp：
 
-1. 检查 Node.js 18+ 和 npm 8+ 是否可用
+1. 检查 Node.js 20+ 和 npm 8+ 是否可用
 
 2. 创建或编辑 .codex/config.json，添加到 mcp_servers：
-   {
-     "terminal-use": {
-       "command": "npx",
-       "args": ["-y", "terminal-use-mcp"],
-       "env": {
-         "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
-         "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
-       }
-     }
-   }
+    {
+      "terminal-use": {
+        "command": "npx",
+        "args": ["-y", "terminal-use-mcp"],
+        "env": {
+          "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
+          "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp",
+          "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
+        }
+      }
+    }
+   - TERMINAL_USE_PROVIDERS 控制启用的 provider（逗号分隔）。
+     常用值：
+     - "native-pty,tmux" — 仅本地（默认，不含 SSH）
+     - "native-pty,tmux,ssh-pty,ssh-tmux" — 全部 provider（含远程 SSH）
+     - "tmux" — 仅 tmux（node-pty 不可用时）
+      如果不确定，使用 "native-pty,tmux"。
+   - 若 tmux 不在 PATH 上，通过 TERMINAL_USE_TMUX_PATH 设置其绝对或相对路径。
+    - Windows：默认仅 native-pty。如需 tmux 支持，安装 psmux（https://github.com/psmux/psmux）
+      其提供 `tmux` 别名，或使用 WSL2。
+    - 安全配置（可选）：
+      - TERMINAL_USE_ALLOW_COMMANDS：允许命令白名单，覆盖内置黑名单（逗号分隔）
+      - TERMINAL_USE_DENY_COMMANDS：额外拒绝命令列表，补充内置黑名单（逗号分隔）
+      - TERMINAL_USE_RISKY_COMMAND_MODE：风险命令处理方式 — "deny"（默认，阻止）、"ask"（提示用户确认）、"allow"（允许全部）
+      如果不确定，保持默认即可（deny 模式对大多数场景是安全的）。
 
-3. 重启 Codex CLI 使配置生效
+3. 安装 skills：
+   - 核心 skill（所有用户必需）：
+     下载 https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
+     保存到 .codex/skills/terminal-use/SKILL.md
+   - 安装代理专属 skill 前，向用户提问：
+     "你需要通过 terminal-use-mcp 远程控制以下哪个 AI 代理 TUI？
+      - Claude Code TUI (tui-claude-code)
+      - Codex CLI TUI (tui-codex-cli)
+      - OpenCode TUI (tui-opencode-native)
+      - OpenCode + OmO 插件 TUI (tui-opencode-omo)
+      如果不确定，先跳过 — 随时可以添加。"
+   - 对用户确认的每个代理，从
+     https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
+     下载并保存到 .codex/skills/<skill-name>/SKILL.md
+   - 下载完成后，向用户提问：
+     "核心 skill 包含本地（§1-§11）和远程 SSH（§12-§17）两部分。
+      如果你只使用本地终端，我可以删除 §12-§17 以节省约 500 行。
+      我也可以裁剪参考章节（模式示例、错误码、键名列表），保留最小 skill（约 80 行）。
+      需要我裁剪吗？"
 
-4. 验证：确认 terminal.health 可用
+4. 重启 Codex CLI 使配置生效
+
+5. 验证：确认 terminal.health 可用
 
 约束：不要输出任何密钥；node-pty 编译失败才通知我
 ```
@@ -165,22 +247,57 @@ stdio 传输：stdout 保留给 MCP 协议，所有日志输出到 stderr。SIGI
 ```
 安装 terminal-use-mcp：
 
-1. 检查 Node.js 18+ 和 npm 8+ 是否可用
+1. 检查 Node.js 20+ 和 npm 8+ 是否可用
 
 2. 在 .opencode/opencode.json 的 mcp 字段中添加：
-   {
-     "type": "local",
-     "command": ["npx", "-y", "terminal-use-mcp"],
-     "enabled": true,
-     "environment": {
-       "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
-       "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
-     }
-   }
+    {
+      "type": "local",
+      "command": ["npx", "-y", "terminal-use-mcp"],
+      "enabled": true,
+      "environment": {
+        "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
+        "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp",
+        "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
+      }
+    }
+   - TERMINAL_USE_PROVIDERS 控制启用的 provider（逗号分隔）。
+     常用值：
+     - "native-pty,tmux" — 仅本地（默认，不含 SSH）
+     - "native-pty,tmux,ssh-pty,ssh-tmux" — 全部 provider（含远程 SSH）
+     - "tmux" — 仅 tmux（node-pty 不可用时）
+      如果不确定，使用 "native-pty,tmux"。
+   - 若 tmux 不在 PATH 上，通过 TERMINAL_USE_TMUX_PATH 设置其绝对或相对路径。
+    - Windows：默认仅 native-pty。如需 tmux 支持，安装 psmux（https://github.com/psmux/psmux）
+      其提供 `tmux` 别名，或使用 WSL2。
+    - 安全配置（可选）：
+      - TERMINAL_USE_ALLOW_COMMANDS：允许命令白名单，覆盖内置黑名单（逗号分隔）
+      - TERMINAL_USE_DENY_COMMANDS：额外拒绝命令列表，补充内置黑名单（逗号分隔）
+      - TERMINAL_USE_RISKY_COMMAND_MODE：风险命令处理方式 — "deny"（默认，阻止）、"ask"（提示用户确认）、"allow"（允许全部）
+      如果不确定，保持默认即可（deny 模式对大多数场景是安全的）。
 
-3. 重启 OpenCode 使配置生效
+3. 安装 skills：
+   - 核心 skill（所有用户必需）：
+     下载 https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
+     保存到 .opencode/skills/terminal-use/SKILL.md
+   - 安装代理专属 skill 前，向用户提问：
+     "你需要通过 terminal-use-mcp 远程控制以下哪个 AI 代理 TUI？
+      - Claude Code TUI (tui-claude-code)
+      - Codex CLI TUI (tui-codex-cli)
+      - OpenCode TUI (tui-opencode-native)
+      - OpenCode + OmO 插件 TUI (tui-opencode-omo)
+      如果不确定，先跳过 — 随时可以添加。"
+   - 对用户确认的每个代理，从
+     https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
+     下载并保存到 .opencode/skills/<skill-name>/SKILL.md
+   - 下载完成后，向用户提问：
+     "核心 skill 包含本地（§1-§11）和远程 SSH（§12-§17）两部分。
+      如果你只使用本地终端，我可以删除 §12-§17 以节省约 500 行。
+      我也可以裁剪参考章节（模式示例、错误码、键名列表），保留最小 skill（约 80 行）。
+      需要我裁剪吗？"
 
-4. 验证：确认 terminal.health 等工具出现在 MCP 工具列表中
+4. 重启 OpenCode 使配置生效
+
+5. 验证：确认 terminal.health 等工具出现在 MCP 工具列表中
 
 约束：不要输出任何密钥；node-pty 编译失败才通知我
 ```
@@ -217,10 +334,44 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 |------|----------|----------|
 | `native-pty` | 大多数交互式 TUI 程序（默认） | 快速响应、高质量快照、高亮检测 |
 | `tmux` | 需要持久化、断连恢复、多人 attach 的会话 | 可 attach、MCP 重启后会话存活 |
-| `ssh-pty`（V2） | 远程主机上的 TUI 程序 | 复用本地 xterm/快照/transcript 栈 |
-| `ssh-tmux`（V2） | 持久远程会话、断连恢复、人类可 attach | 完整远程 tmux 生命周期管理 |
+| `ssh-pty` | 远程主机上的 TUI 程序 | 复用本地 xterm/快照/transcript 栈 |
+| `ssh-tmux` | 持久远程会话、断连恢复、人类可 attach | 完整远程 tmux 生命周期管理 |
 
 自动选择：本地 → native-pty（fallback tmux）；远程 → ssh-pty（fallback ssh-tmux）。
+
+### Provider 配置
+
+通过 `TERMINAL_USE_PROVIDERS` 环境变量控制启用的 provider（逗号分隔白名单）。未设置则全部启用。
+
+```json
+{
+  "env": {
+    "TERMINAL_USE_PROVIDERS": "native-pty,tmux"
+  }
+}
+```
+
+| 值 | 效果 |
+|------|------|
+| _(未设置)_ | 全部 provider 启用 |
+| `native-pty,tmux` | 仅本地 — 不含 SSH provider |
+| `tmux` | 仅 tmux — 适用于没有 node-pty 的环境 |
+| `ssh-pty,ssh-tmux` | 仅远程 — 不含本地终端 provider |
+
+禁用的 provider 不参与注册和自动选择。`terminal.health` 会将它们报告为 `"disabled by TERMINAL_USE_PROVIDERS config"`。
+
+### 环境变量
+
+| 变量 | 用途 | 默认值 |
+|------|------|--------|
+| `TERMINAL_USE_PROVIDERS` | 启用 provider 白名单（逗号分隔） | 全部 provider |
+| `TERMINAL_USE_DEFAULT_PROVIDER` | 默认 provider（覆盖自动选择优先级） | `native-pty` |
+| `TERMINAL_USE_TMUX_PATH` | tmux 二进制的绝对或相对路径（当 tmux 不在 PATH 上时） | `tmux` |
+| `TERMINAL_USE_WORKSPACE_ROOT` | CWD 策略根目录 | 当前工作目录 |
+| `TERMINAL_USE_ALLOWED_CWD` | 允许的工作目录（逗号分隔） | 工作区根目录 |
+| `TERMINAL_USE_ALLOW_COMMANDS` | 允许的命令，即使在内置黑名单中（逗号分隔，覆盖黑名单） | _(空)_ |
+| `TERMINAL_USE_DENY_COMMANDS` | 在内置黑名单之外额外拒绝的命令（逗号分隔） | _(空)_ |
+| `TERMINAL_USE_RISKY_COMMAND_MODE` | 黑名单命令处理方式：`deny`、`ask` 或 `allow` | `deny` |
 
 ## MCP 工具
 
@@ -268,7 +419,7 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `terminal.events` | 获取会话事件历史 |
 | `terminal.send_signal` | 发送信号（SIGINT/SIGTERM/SIGKILL） |
 
-### 远程控制（3 个工具，V2 设计阶段）
+### 远程控制（3 个工具）
 
 | 工具 | 用途 |
 |------|------|
@@ -276,21 +427,29 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `terminal.target_info` | 查询目标详情（脱敏） |
 | `terminal.verify_target` | 验证 SSH 目标连通性 |
 
+### tmux 管理（2 个工具）
+
+| 工具 | 用途 |
+|------|------|
+| `terminal.tmux_list` | 列出本地或远程 tmux 会话 |
+| `terminal.tmux_kill` | 按名称终止 tmux 会话 |
+
 ## 安全概览
 
 terminal-use-mcp 不是沙箱。安全策略限制入口，不限制 TUI 程序内部行为。
 
-- **命令拒绝列表**：阻止危险启动命令（`sudo`、`rm`、`ssh`、`curl` 等）
-- **CWD 策略**：仅允许工作区根目录下的目录
+- **命令白名单 + 黑名单**：内置黑名单阻止危险启动命令（`sudo`、`rm`、`ssh`、`curl` 等）。`TERMINAL_USE_ALLOW_COMMANDS` 白名单可覆盖黑名单（白名单优先）。`TERMINAL_USE_DENY_COMMANDS` 扩展黑名单。`TERMINAL_USE_RISKY_COMMAND_MODE` 控制黑名单命令处理方式：`deny`（默认，阻止）、`ask`（返回确认提示）、`allow`（允许所有）
+- **CWD 策略**：仅允许 `TERMINAL_USE_WORKSPACE_ROOT` 或 `TERMINAL_USE_ALLOWED_CWD` 内的目录
 - **密钥脱敏**：自动将 API key、token、私钥替换为 `<REDACTED_*>`
 - **确认检测**：屏幕出现危险提示时发出警告
+- **Provider 白名单**：`TERMINAL_USE_PROVIDERS` 控制启用的 provider（未设置=全部启用）
 - **observationTrust**：所有快照返回 `observationTrust: "untrusted"` — 终端输出是不受信观察，不是指令
 
 详见 [docs/security.md](docs/security.md)。
 
-## 远程 SSH（V2，设计阶段）
+## 远程 SSH
 
-V2 远程功能处于设计阶段。两种 SSH 提供者：
+远程 SSH 功能让你控制远程主机上的 TUI 程序。两种 SSH 提供者：
 
 | | ssh-pty | ssh-tmux |
 |--|---------|----------|
@@ -300,7 +459,7 @@ V2 远程功能处于设计阶段。两种 SSH 提供者：
 
 SSH 目标定义在 `~/.config/terminal-use-mcp/hosts.json`。禁止密码登录；仅支持 ssh-agent 或密钥文件认证。
 
-详见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md)。
+详见 [docs/REMOTE_TERMINAL_GUIDE.md](docs/REMOTE_TERMINAL_GUIDE.md)。
 
 ## 延伸阅读
 
@@ -309,7 +468,7 @@ SSH 目标定义在 `~/.config/terminal-use-mcp/hosts.json`。禁止密码登录
 | 安全策略、环境变量、拒绝列表 | [docs/security.md](docs/security.md) |
 | 回滚策略、缓冲模式 | [docs/scrollback.md](docs/scrollback.md) |
 | 类型定义、错误码 | [docs/types-and-errors.md](docs/types-and-errors.md) |
-| 远程 SSH V2 设计 | [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md) |
+| 远程 SSH 设计 | [docs/REMOTE_TERMINAL_GUIDE.md](docs/REMOTE_TERMINAL_GUIDE.md) |
 | 远程 SSH 架构 | [docs/REMOTE_SSH_ARCHITECTURE.md](docs/REMOTE_SSH_ARCHITECTURE.md) |
 | 控制 Claude Code TUI | [docs/TUI_CLAUDE_CODE.md](docs/TUI_CLAUDE_CODE.md) |
 | 控制 Codex CLI TUI | [docs/TUI_CODEX_CLI.md](docs/TUI_CODEX_CLI.md) |

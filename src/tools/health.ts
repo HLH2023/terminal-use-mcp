@@ -26,7 +26,12 @@ function errorToToolResult(err: unknown): ToolErrorResult {
 
 const PROVIDER_NAMES: ProviderName[] = ["native-pty", "tmux", "ssh-pty", "ssh-tmux"]
 
-export function registerHealthTool(server: McpServer, providers: Map<ProviderName, TerminalProvider>, version = "0.1.0"): void {
+export function registerHealthTool(
+  server: McpServer,
+  providers: Map<ProviderName, TerminalProvider>,
+  disabledProviders: Set<ProviderName>,
+  version = "0.1.0",
+): void {
   server.registerTool(
     "terminal.health",
     {
@@ -35,7 +40,7 @@ export function registerHealthTool(server: McpServer, providers: Map<ProviderNam
     },
     async () => {
       try {
-        const providerHealth = await buildProviderHealth(providers)
+        const providerHealth = await buildProviderHealth(providers, disabledProviders)
         const hasAvailableProvider = Object.values(providerHealth).some((entry) => entry.available)
         const output: HealthOutput = {
           ok: true,
@@ -54,8 +59,15 @@ export function registerHealthTool(server: McpServer, providers: Map<ProviderNam
   )
 }
 
-async function buildProviderHealth(providers: Map<ProviderName, TerminalProvider>): Promise<Record<ProviderName, ProviderHealth>> {
+async function buildProviderHealth(
+  providers: Map<ProviderName, TerminalProvider>,
+  disabledProviders: Set<ProviderName>,
+): Promise<Record<ProviderName, ProviderHealth>> {
   const entries = await Promise.all(PROVIDER_NAMES.map(async (providerName): Promise<[ProviderName, ProviderHealth]> => {
+    if (disabledProviders.has(providerName)) {
+      return [providerName, { available: false, reason: "disabled by TERMINAL_USE_PROVIDERS config" }]
+    }
+
     const provider = providers.get(providerName)
     if (provider === undefined) {
       return [providerName, { available: false, reason: "not registered" }]

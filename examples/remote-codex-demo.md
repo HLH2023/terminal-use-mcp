@@ -2,7 +2,7 @@
 
 演示如何使用 `ssh-pty` provider 连接远程主机，启动 OpenAI Codex CLI，发送任务并监控其行为。
 
-> V2 远程功能处于设计阶段，尚未实现。完整设计参见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](../docs/V2_REMOTE_TERMINAL_GUIDE.md)。
+> Remote SSH features are available. Full design: [REMOTE_TERMINAL_GUIDE.md](../docs/REMOTE_TERMINAL_GUIDE.md).
 
 > 安全关键: Codex 可能请求文件写入、命令执行或其他危险操作。遇到 "Allow command?" 等权限提示时，必须 STOP 并询问用户，绝不能自动批准。
 

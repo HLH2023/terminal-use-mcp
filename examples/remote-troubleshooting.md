@@ -1,8 +1,8 @@
 # 远程 SSH 连接故障排查
 
-远程 terminal session (V2, 设计阶段) 的常见错误、原因和解决方案。
+Common errors, causes, and solutions for remote terminal sessions.
 
-> V2 远程功能处于设计阶段，尚未实现。完整设计参见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](../docs/V2_REMOTE_TERMINAL_GUIDE.md)。
+> Remote SSH features are available. Full design: [REMOTE_TERMINAL_GUIDE.md](../docs/REMOTE_TERMINAL_GUIDE.md).
 
 ---
 
@@ -177,7 +177,7 @@ ssh hlh@192.168.1.20
 1. ssh-agent 未启动或未加载对应密钥
 2. profile 中 `key-file` 路径错误
 3. 密钥 passphrase 未通过 `passphraseEnv` 正确引用
-4. V2 不支持密码登录，如果服务器只允许密码方式则会失败
+4. Password login is not supported，如果服务器只允许密码方式则会失败
 
 ### 解决
 
@@ -243,7 +243,7 @@ ssh -v hlh@192.168.1.20
 # 看 "Offering public key" 和 "Server accepts key" 日志
 ```
 
-如果服务器只允许密码认证，V2 不支持，需要在远程服务器上启用公钥认证。
+如果服务器只允许密码认证，Password login is not supported，需要在远程服务器上启用公钥认证。
 
 ---
 
@@ -333,7 +333,7 @@ sudo ss -tlnp | grep :22
 ### 原因
 
 1. 远程主机未安装 tmux
-2. tmux 版本太旧 (< 3.4)
+2. tmux version too old (< 3.2)
 3. profile 中 `allowTmux: true` 但远程无 tmux
 
 ### 解决
@@ -355,7 +355,7 @@ brew install tmux
 
 ```bash
 tmux -V
-# 需要 3.4+
+# 需要 3.2+
 ```
 
 3. **如果不需要 tmux**，把 profile 中 `allowTmux` 设为 `false`，强制使用 `ssh-pty`。
@@ -450,7 +450,7 @@ terminal.start({ cwd: "/home/hlh/dev/project", ... })
 
 直接在 `terminal.start` 的 `target` 参数中指定 `host`/`port`/`username`（而非 profile），且未启用 inline SSH targets。
 
-V2 默认禁止这种方式，因为 inline target 绕过了 hosts.json 的集中管理和安全审查。
+Inline SSH targets are denied by default，因为 inline target 绕过了 hosts.json 的集中管理和安全审查。
 
 ### 解决
 

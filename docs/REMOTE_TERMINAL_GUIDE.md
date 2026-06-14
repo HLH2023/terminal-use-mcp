@@ -1,13 +1,13 @@
-# terminal-use-mcp V2 指导：Remote Terminal Control over SSH
+# terminal-use-mcp Design Guide：Remote Terminal Control over SSH
 
 > 2026-06-13
 > 状态: 指导文档 — 待实施
 
 ---
 
-## 0. V2 总目标
+## 0. Objectives
 
-当前 V1 已经大致实现本地 terminal computer use 能力。V2 的目标是把该工具升级为：
+Local terminal control is already implemented.大致实现本地 terminal computer use 能力。Remote control extends the tool to把该工具升级为：
 
 ```
 Local + Remote Terminal Computer Use over MCP
@@ -23,7 +23,7 @@ local native-pty / local tmux / ssh-pty / ssh-tmux
 本机或远程主机上的 TUI 程序
 ```
 
-V2 必须做到生产级可用，而不是 demo。
+Remote must achieve production quality，而不是 demo。
 
 它应支持 agent 通过 MCP 稳定控制：
 
@@ -32,7 +32,7 @@ V2 必须做到生产级可用，而不是 demo。
 * 远程主机上的 CLI agent，例如 Claude Code、Codex、OpenCode、Gemini CLI；
 * 远程 lazygit、vim、nvim、htop、btop、nmtui、REPL、debugger、安装器等交互式程序。
 
-V2 不替代 ACP。ACP 是结构化 agent 协议；本工具是 terminal computer use，用于操作已有终端界面、远程联调、排障、无 API 的 TUI 程序和外部 CLI agent。
+Does not replace ACP。ACP 是结构化 agent 协议；本工具是 terminal computer use，用于操作已有终端界面、远程联调、排障、无 API 的 TUI 程序和外部 CLI agent。
 
 ## 1. 核心设计原则
 
@@ -124,7 +124,7 @@ TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1
 
 才允许 inline host。
 
-## 2. V2 范围
+## 2. Remote Scope
 
 ### 2.1 必须实现
 
@@ -147,7 +147,7 @@ TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1
 
 ### 2.2 非目标
 
-V2 不做：
+Remote does not：
 
 1. 不做 ACP。
 2. 不做 HomeLab 主远程访问网关。
@@ -204,7 +204,7 @@ export type SshAuthRef =
 { type: "password" }
 ```
 
-V2 不支持密码登录。
+Password login is not supported。
 
 ### 3.3 SshHostProfile
 
@@ -352,7 +352,7 @@ passphraseEnv
 
 ## 5. 新增文件结构
 
-在现有 V1 结构上新增：
+Adding to the existing local structure：
 
 ```
 src/
@@ -418,9 +418,9 @@ examples/
 
 ### 6.1 定位
 
-`ssh-pty` 是 V2 主路径 Provider。
+`ssh-pty` is the primary remote provider。
 
-它通过 SSH 建立远程 PTY channel，并复用 V1 的 xterm adapter、snapshot、wait、transcript、riskSignals、redaction 体系。
+它通过 SSH 建立远程 PTY channel，并reusing the local xterm adapter、snapshot、wait、transcript、riskSignals、redaction 体系。
 
 ### 6.2 架构
 
@@ -453,7 +453,7 @@ snapshot / wait / transcript
 * keepalive；
 * graceful close；
 * channel error handling；
-* reconnect 不作为 V2 必需，但断线状态必须正确标记。
+* Auto-reconnect is not required，但断线状态必须正确标记。
 
 ### 6.4 command 启动方式
 
@@ -534,7 +534,7 @@ type SshSessionMetadata = {
 
 ### 7.1 定位
 
-`ssh-tmux` 是 V2 持久会话 Provider。
+`ssh-tmux` is the persistent remote session provider。
 
 它用于：
 
@@ -699,7 +699,7 @@ ssh-pty → ssh-tmux
 }
 ```
 
-## 10. Safety Layer V2
+## 10. Remote Safety Layer
 
 ### 10.1 LocalCwdPolicy 与 RemoteCwdPolicy 分离
 
@@ -793,7 +793,7 @@ The authenticity of host ... can't be established
 * SSH fingerprint 不作为 secret，但不应过度暴露在默认摘要中；
 * 环境变量输出必须过 redaction。
 
-## 11. SKILL.md V2 追加要求
+## 11. SKILL.md Remote Additions要求
 
 更新 `skills/terminal-use-local/SKILL.md`，加入远程章节。
 
@@ -823,7 +823,7 @@ Prefer terminal.verify_target before terminal.start on remote targets.
 Use ssh-tmux for long-running remote sessions when persistence is required.
 ```
 
-## 12. README V2 追加内容
+## 12. README Remote Additions内容
 
 必须增加：
 
@@ -924,7 +924,7 @@ tests/ssh-fixtures/docker-compose.ssh-test.yml
 
 如果出现 approve/allow/run command，必须停止。
 
-## 14. Artifact V2
+## 14. Remote Artifacts
 
 远程 session artifact：
 
@@ -974,7 +974,7 @@ artifacts/integration/<runId>/
 
 ## 15. 完成标准
 
-V2 完成必须满足：
+Remote completion必须满足：
 
 1. `TerminalTarget` 已实现。
 2. SSH profile loader 已实现。
@@ -1098,14 +1098,14 @@ terminal.snapshot
 
 ## 17. 开发阶段建议
 
-### Phase V2-0：远程设计落文档
+### Phase Remote-0：远程设计落文档
 
 * 更新 DEV-PLAN.md。
 * 更新 README。
 * 更新 SKILL.md。
 * 不写代码。
 
-### Phase V2-1：Target schema + profile loader
+### Phase Remote-1：Target schema + profile loader
 
 * TerminalTarget。
 * SshHostProfile。
@@ -1113,7 +1113,7 @@ terminal.snapshot
 * RemoteCwdPolicy。
 * tests。
 
-### Phase V2-2：Host key + auth
+### Phase Remote-2：Host key + auth
 
 * known_hosts parser 或 pinned fingerprint。
 * ssh-agent auth。
@@ -1121,7 +1121,7 @@ terminal.snapshot
 * verify_target。
 * tests。
 
-### Phase V2-3：ssh-pty Provider
+### Phase Remote-3：ssh-pty Provider
 
 * ssh2 channel。
 * xterm adapter。
@@ -1131,13 +1131,13 @@ terminal.snapshot
 * transcript。
 * integration fixture。
 
-### Phase V2-4：ssh-tmux Provider
+### Phase Remote-4：ssh-tmux Provider
 
 * remote tmux commands。
 * attach/list/snapshot/type/press/kill。
 * integration fixture。
 
-### Phase V2-5：远程 examples + 联调证据
+### Phase Remote-5：远程 examples + 联调证据
 
 * remote demos。
 * troubleshooting。

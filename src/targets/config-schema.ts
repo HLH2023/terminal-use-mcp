@@ -237,6 +237,8 @@ export const LocalConfigSchema = z.object({
   artifactDir: z.string().min(1).optional(),
   /** 日志级别 */
   logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
+  /** 启用的 provider 列表（对应 TERMINAL_USE_PROVIDERS） */
+  providers: z.array(z.enum(["native-pty", "tmux", "ssh-pty", "ssh-tmux"])).optional(),
 })
 
 export type LocalConfigInput = z.input<typeof LocalConfigSchema>
