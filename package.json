@@ -1,7 +1,7 @@
 {
   "name": "terminal-use-mcp",
   "version": "0.1.0",
-  "description": "MCP Server for terminal computer use \u2014 control interactive TUI programs (vim, htop, lazygit, REPLs, installers) via MCP protocol",
+  "description": "MCP Server for terminal computer use — control interactive TUI programs (vim, htop, lazygit, REPLs, installers) via MCP protocol",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -22,10 +22,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ssh2": "^1.17.0",
-    "zod": "^3.25.0",
+    "@xterm/addon-unicode11": "^0.9.0",
     "@xterm/headless": "^6.0.0",
-    "@xterm/addon-unicode11": "^0.9.0"
+    "ssh2": "^1.17.0",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.21",
