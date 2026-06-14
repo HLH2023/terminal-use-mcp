@@ -1,0 +1,73 @@
+{
+  "name": "terminal-use-mcp",
+  "version": "0.1.0",
+  "description": "MCP Server for terminal computer use \u2014 control interactive TUI programs (vim, htop, lazygit, REPLs, installers) via MCP protocol",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "terminal-use-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract",
+    "test:mcp": "vitest run tests/mcp",
+    "test:integration": "vitest run tests/integration",
+    "check": "npm run typecheck && npm run test",
+    "prepublishOnly": "npm run build && npm run check"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ssh2": "^1.17.0",
+    "zod": "^3.25.0",
+    "@xterm/headless": "^6.0.0",
+    "@xterm/addon-unicode11": "^0.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.21",
+    "@types/ssh2": "^1.15.5",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.6"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "terminal",
+    "tui",
+    "computer-use",
+    "pty",
+    "vim",
+    "htop",
+    "lazygit"
+  ],
+  "license": "MIT",
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README_zh.md",
+    "LICENSE"
+  ],
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HLH2023/terminal-use-mcp.git"
+  },
+  "homepage": "https://github.com/HLH2023/terminal-use-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/HLH2023/terminal-use-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "local": {
+    "logLevel": "info",
+    "workspaceRoot": "${TERMINAL_USE_WORKSPACE_ROOT}"
+  },
+  "sshDefaults": {
+    "allowTmux": true,
+    "connectTimeoutMs": 10000,
+    "keepaliveIntervalMs": 15000,
+    "remoteDeniedCwd": ["/", "/root", "/etc", "/boot", "/proc", "/sys"]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "host": "localhost",
+  "port": 22,
+  "username": "hlh",
+  "auth": { "type": "agent" },
+  "knownHosts": "~/.ssh/known_hosts",
+  "defaultCwd": "/home/hlh/dev",
+  "remoteAllowedCwd": ["/home/hlh/dev", "/tmp", "/srv"],
+  "allowTmux": true
+}

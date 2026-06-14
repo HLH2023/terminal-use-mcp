@@ -1,0 +1,97 @@
+{
+  "mcpServers": {
+    "terminal-use": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/terminal-use-mcp/src/index.ts"],
+      "env": {
+        "TERMINAL_USE_WORKSPACE_ROOT": "/home/user/dev/my-project",
+        "TERMINAL_USE_LOG_LEVEL": "info"
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Environment Variables Reference
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// REQUIRED:
+//   TERMINAL_USE_WORKSPACE_ROOT   The root directory the server is allowed
+//                                  to operate in. All cwd values in
+//                                  terminal.start must be within this path.
+//                                  Subdirectories are allowed.
+//                                  Example: "/home/user/dev/my-project"
+//
+// OPTIONAL:
+//   TERMINAL_USE_LOG_LEVEL        Logging verbosity. One of: "debug" | "info"
+//                                  (default) | "warn" | "error".
+//                                  Logs go to stderr only (stdout is reserved
+//                                  for MCP protocol).
+//
+//   TERMINAL_USE_ALLOWED_CWD      Comma-separated list of additional
+//                                  directory roots allowed as cwd.
+//                                  Example: "/tmp,/home/user/other-project"
+//
+//   TERMINAL_USE_ALLOW_COMMANDS   Comma-separated list of commands to remove
+//                                  from the built-in denylist.
+//                                  Use with caution — these bypass safety
+//                                  checks.
+//                                  Example: "curl,wget"
+//
+//   TERMINAL_USE_DENY_COMMANDS    Comma-separated list of commands to add
+//                                  to the denylist beyond the defaults
+//                                  (sudo, su, ssh, rm, dd, ...).
+//                                  Example: "docker,kubectl"
+//
+//   TERMINAL_USE_RISKY_COMMAND_MODE  How to handle risky commands.
+//                                     "deny"  — refuse (default)
+//                                     "ask"   — return CONFIRMATION_REQUIRED,
+//                                               agent should stop and ask user
+//                                     "allow" — allow without prompt
+//
+//   TERMINAL_USE_SESSION_TTL_MS  Maximum idle time before a session is
+//                                  auto-killed. Default: 3600000 (1 hour).
+//
+//   TERMINAL_USE_CLEANUP_INTERVAL_MS
+//                                  How often the TTL reaper runs.
+//                                  Default: 60000 (1 minute).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider Defaults
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The server auto-selects a provider on terminal.start unless you explicitly
+// pass the "provider" parameter:
+//
+//   provider: "native-pty"   — node-pty + @xterm/headless (best quality,
+//                               requires C++ build tools for node-pty)
+//   provider: "tmux"         — tmux 3.4+ backend (works everywhere tmux
+//                               is available, no native addons)
+//
+// Auto-selection order: native-pty → tmux.
+// If node-pty fails to load, it falls back to tmux automatically.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Common Configurations
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Minimal (native-pty, default settings):
+//   env: { "TERMINAL_USE_WORKSPACE_ROOT": "/home/user/dev/project" }
+//
+// tmux-only (no native addons):
+//   env: {
+//     "TERMINAL_USE_WORKSPACE_ROOT": "/home/user/dev/project",
+//     "TERMINAL_USE_PROVIDER": "tmux"
+//   }
+//
+// Risky mode (agent asks user before running risky commands):
+//   env: {
+//     "TERMINAL_USE_WORKSPACE_ROOT": "/home/user/dev/project",
+//     "TERMINAL_USE_RISKY_COMMAND_MODE": "ask"
+//   }
+//
+// Multiple workspace roots:
+//   env: {
+//     "TERMINAL_USE_WORKSPACE_ROOT": "/home/user/dev/project",
+//     "TERMINAL_USE_ALLOWED_CWD": "/tmp,/home/user/other-project"
+//   }

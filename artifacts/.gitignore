@@ -1,0 +1,4 @@
+sessions/
+integration/
+*.log
+*.jsonl
