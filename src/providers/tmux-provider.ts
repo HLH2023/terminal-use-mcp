@@ -23,7 +23,7 @@ import { parsedKeyToTmuxKey } from "../terminal/keymap.js"
 import { createSnapshot } from "../terminal/terminal-snapshot.js"
 import { detectRiskSignals } from "../terminal/confirm-detection.js"
 import { calculatePollDelay, checkScreenStable, checkTextMatch, hashScreen } from "../terminal/wait.js"
-import { validateRegexSafety } from "../terminal/command-safety.js"
+import { validateRegexSafety, createSafeRegex } from "../terminal/command-safety.js"
 import { TerminalUseError } from "../terminal/errors.js"
 import type { ScreenState } from "../terminal/wait.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
@@ -428,7 +428,7 @@ export class TmuxProvider implements TerminalProvider {
       if (!validation.ok) {
         throw new TerminalUseError({ code: "UNSAFE_REGEX", message: validation.reason, retryable: false })
       }
-      return new RegExp(pattern, "gu")
+      return createSafeRegex(pattern, "gu")
     })() : undefined
 
     for (let row = 0; row < lines.length; row += 1) {

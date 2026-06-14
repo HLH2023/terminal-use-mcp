@@ -647,44 +647,98 @@ export { isSubdirectory, isSubdirectoryCanonical, normalizePathForComparison }
 // 正则表达式 ReDoS 防护
 // ============================================================
 
-/** 用户正则表达式最大允许长度（字符数） */
-export const MAX_REGEX_LENGTH = 500
+/**
+ * RE2 模块懒加载单例。
+ *
+ * 三态：undefined = 尚未尝试加载，any 非 null = 加载成功，null = 不可用。
+ * 使用 require() 同步加载，因为 re2 是 native addon，
+ * 在 ESM 中 require() 仍可用于加载 C++ 模块（且被 re2 官方文档推荐）。
+ * 懒加载保证 re2 缺失时服务器仍能正常启动。
+ */
+let _re2: any = undefined
+
+function getRe2(): any {
+  if (_re2 === undefined) {
+    try {
+      _re2 = require("re2")
+    } catch {
+      _re2 = null
+    }
+  }
+  return _re2
+}
 
 /**
  * 嵌套量词 ReDoS 启发式检测。
  *
- * 检测形如 `(…+)+`、`(…*)*`、`(…{n,m})+` 的嵌套量词模式，
+ * 检测形如 `(…+)+`、`(…*)*`、`(…{n,m})+`、`(…+)?` 的嵌套量词模式，
  * 这是经典 ReDoS 攻击的构造方式。
  * 该检测为 conservative — 可能产生少量误报，但不允许漏过典型攻击。
+ * 仅在 RE2 不可用时作为 fallback 使用。
  */
-const NESTED_QUANTIFIER_RE = /\([^)]*[+*{][^)]*\)[+*{]/
+function hasNestedQuantifiers(pattern: string): boolean {
+  return /\([^)]*[+*{][^)]*\)[+*{?]/.test(pattern)
+}
 
 export type RegexValidationResult =
-  | { ok: true }
-  | { ok: false; reason: string }
+  | { ok: true; warning?: string }
+  | { ok: false; reason: string; code: "INVALID_REGEX" | "UNSAFE_REGEX_PATTERN" }
 
 /**
  * 对用户提供的正则表达式做安全验证，防止 ReDoS。
  *
- * 1. 长度截断：超过 MAX_REGEX_LENGTH 直接拒绝
- * 2. 嵌套量词启发式：检测经典 ReDoS 模式，warn 但仍允许（降低误报影响）
+ * 策略分层：
+ * 1. RE2 可用时：用 RE2 编译正则，成功即安全（RE2 保证线性时间执行）。
+ *    不需要任何启发式检查——RE2 在数学上不会发生灾难性回溯。
+ * 2. RE2 不可用时：用嵌套量词启发式检测拒绝已知危险模式。
+ *    这不是完美防护（可能误报也可能漏报），但覆盖了经典 ReDoS 攻击。
  *
- * 注意：该函数不验证正则语法——语法错误交给 new RegExp() 自行抛出。
+ * 注意：500 字符长度限制已移除——RE2 可安全执行任意长度的正则，
+ * 启发式 fallback 下嵌套量词检测比固定长度限制更精准。
  */
 export function validateRegexSafety(pattern: string): RegexValidationResult {
-  if (pattern.length > MAX_REGEX_LENGTH) {
-    return {
-      ok: false,
-      reason: `正则表达式长度 ${pattern.length} 超过上限 ${MAX_REGEX_LENGTH}，拒绝执行以防 ReDoS`,
+  const re2 = getRe2()
+
+  // RE2 可用：编译测试即可，RE2 保证线性时间
+  if (re2 !== null) {
+    try {
+      new re2(pattern)  // eslint-disable-line no-new
+      return { ok: true, warning: "RE2 engine active — linear time guaranteed" }
+    } catch (e) {
+      return {
+        ok: false,
+        reason: `Invalid regex: ${String(e)}`,
+        code: "INVALID_REGEX",
+      }
     }
   }
 
-  if (NESTED_QUANTIFIER_RE.test(pattern)) {
-    // 嵌套量词是可疑模式但非绝对恶意，仅 warn 不拒绝
-    // 实际执行中如果真的卡住，进程超时机制会兜底
-    // eslint-disable-next-line no-console
-    console.warn(`[terminal-use] 正则表达式含嵌套量词，可能造成 ReDoS: ${pattern.slice(0, 80)}...`)
+  // RE2 不可用：启发式检测嵌套量词
+  if (hasNestedQuantifiers(pattern)) {
+    return {
+      ok: false,
+      reason: "Regex contains nested quantifiers which may cause catastrophic backtracking. Install the 're2' package for guaranteed linear-time regex execution.",
+      code: "UNSAFE_REGEX_PATTERN",
+    }
   }
 
-  return { ok: true }
+  return { ok: true, warning: "Heuristic check only (install 're2' for guaranteed protection)" }
+}
+
+/**
+ * 创建安全的正则表达式对象。
+ *
+ * RE2 可用时返回 RE2 实例（API 兼容 RegExp，保证线性时间），
+ * RE2 不可用时 fallback 到原生 RegExp。
+ * RE2 对象支持 .test()、.exec()、.matchAll() 等方法，可直接替换原生 RegExp。
+ *
+ * @param pattern - 正则表达式模式字符串
+ * @param flags - 正则标志（如 "g"、"gi" 等）
+ */
+export function createSafeRegex(pattern: string, flags?: string): RegExp {
+  const re2 = getRe2()
+  if (re2 !== null) {
+    return flags ? new re2(pattern, flags) : new re2(pattern)
+  }
+  return flags ? new RegExp(pattern, flags) : new RegExp(pattern)
 }

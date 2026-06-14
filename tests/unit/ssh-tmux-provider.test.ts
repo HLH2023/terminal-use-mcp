@@ -63,9 +63,11 @@ function createProviderWithExecutor(
   calls: string[][]
 } {
   const calls: string[][] = []
-  const executor: SshTmuxCommandExecutor = async (_profile, args) => {
+  const executor: SshTmuxCommandExecutor = async (_profile, args, _options) => {
     calls.push([...args])
-    return handler?.(args) ?? ok()
+    if (handler !== undefined) return handler(args)
+    if (args.includes("pwd")) return ok("/home/tester/project\n")
+    return ok()
   }
   const provider = new SshTmuxProvider(logger, {
     hostsConfig: new Map([["devbox", createProfile()]]),
@@ -311,6 +313,7 @@ describe("SshTmuxProvider", () => {
       if (args[1] === "capture-pane") return ok("hello\nworld\n")
       if (args[1] === "display-message" && args.includes("#{history_size}")) return ok("23\n")
       if (args[1] === "display-message" && args.includes("#{session_name}")) return ok("remote-title\n")
+      if (args.includes("pwd")) return ok("/home/tester/project\n")
       return ok()
     })
 

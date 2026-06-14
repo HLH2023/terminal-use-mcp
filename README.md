@@ -39,7 +39,7 @@ Unlike `tmux send-keys` + `sleep`, the server observes PTY render events directl
 |------------|---------|---------|
 | Node.js | 20+ | Run the MCP server |
 | npm | 8+ | Install dependencies |
-| node-gyp + C++ toolchain | — | Compile node-pty (optional; fallback to tmux if missing) |
+| node-gyp + C++ toolchain | — | Compile node-pty (optional; fallback to tmux if missing). Also needed for re2 (optional; ReDoS protection) |
 | tmux | 3.2+ | tmux provider (optional; only native-pty available if missing) |
 
 ### MCP Client Configuration
@@ -506,6 +506,7 @@ terminal-use-mcp is not a sandbox. Security policies restrict the entry point, n
 - **Confirmation detection**: Warns when dangerous prompts appear on screen
 - **Provider whitelist**: `TERMINAL_USE_PROVIDERS` controls which providers are enabled (unset = all)
 - **observationTrust**: All snapshots return `observationTrust: "untrusted"` — terminal output is untrusted observation, not instruction
+- **ReDoS protection**: User-supplied regex is validated against catastrophic backtracking. When the `re2` optional dependency is installed, all regex execution uses the RE2 engine (guaranteed linear time). Without `re2`, a heuristic nested-quantifier detector blocks known dangerous patterns.
 
 See [docs/security.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/security.md) for full policy details, env var overrides, and regex patterns.
 
@@ -577,6 +578,7 @@ All permissively licensed (MIT). No GPL/LGPL dependencies.
 | zod | MIT |
 | @xterm/headless + addon-unicode11 | MIT |
 | node-pty (optional) | MIT |
+| re2 (optional) | BSD-3-Clause |
 
 ## License
 

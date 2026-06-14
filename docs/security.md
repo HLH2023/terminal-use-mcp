@@ -59,7 +59,7 @@ const deniedCwdRoots = ["/", "/root", "/home", "/etc", "/usr", "/var", "/sys", "
 
 When workspace root is `$HOME/dev/homelab`, `$HOME/dev/homelab/**` is allowed, but the entire `$HOME` is not.
 
-Remote CWD uses independent validation with `remoteAllowedCwd` / `remoteDeniedCwd` from the profile, not local rules.
+Remote CWD uses independent validation with `remoteAllowedCwd` / `remoteDeniedCwd` from the profile, not local rules. **Known limitation**: remote CWD validation is string-based prefix matching — remote symlinks pointing outside allowed roots are not detected.
 
 ## Secret Redaction
 

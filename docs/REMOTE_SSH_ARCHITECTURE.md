@@ -423,7 +423,7 @@ This is disabled by default because inline targets bypass profile-based CWD poli
 
 | Limitation | Detail |
 |------------|--------|
-| **CWD validation is local** | Remote CWD policy checks run locally. The server does not verify that the directory actually exists on the remote host. |
+| **CWD validation is local** | Remote CWD policy checks run locally via string prefix matching (`normalizeRemotePath`). The server does not resolve remote symlinks — a remote symlink pointing outside the allowed CWD root (e.g. `/home/user/dev/link → /etc`) will pass string validation but access a denied directory at runtime. |
 | **No Windows SSH host support for ssh-tmux** | ssh-tmux requires tmux on the remote host, which is Unix-only. ssh-pty works with Windows SSH hosts (ConPTY). |
 | **System SSH transport dependency** | ssh-tmux requires the `ssh` binary on the local PATH. If missing, only ssh-pty is available for remote sessions. |
 

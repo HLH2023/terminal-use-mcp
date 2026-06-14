@@ -6,7 +6,7 @@ import { mouseClickToTmuxSequence, mouseScrollToTmuxSequence, validateMouseCoord
 import { createSnapshot } from "../terminal/terminal-snapshot.js";
 import { detectRiskSignals } from "../terminal/confirm-detection.js";
 import { calculatePollDelay, checkScreenStable, checkTextMatch, hashScreen } from "../terminal/wait.js";
-import { validateRegexSafety } from "../terminal/command-safety.js";
+import { validateRegexSafety, createSafeRegex } from "../terminal/command-safety.js";
 import { TranscriptRecorder } from "../terminal/transcript.js";
 import { generateSessionId } from "../terminal/ids.js";
 import { createRemoteCwdPolicy, assertRemoteCwdAllowed } from "../targets/remote-cwd-policy.js";
@@ -15,6 +15,7 @@ import { expandUserPath, loadHostsConfig } from "../targets/ssh-host-config.js";
 import { resolveSshTarget } from "../targets/ssh-profile-loader.js";
 import { DependencyMissingError, ProcessExitedError, RemoteCommandDeniedError, RemoteTmuxNotAvailableError, SessionNotFoundError, SessionTimeoutError, TerminalUseError, } from "../terminal/errors.js";
 import { execRemote, execSshCommand, isSystemSshAvailable } from "./system-ssh-transport.js";
+import { cleanupTempKnownHosts, verifyPinnedFingerprintOrThrow, } from "../targets/ssh-keyscan-verify.js";
 const SSH_TMUX_EXEC_TIMEOUT_MS = 10_000;
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
 const LINE_PASTE_DELAY_MS = 5;
@@ -42,11 +43,13 @@ const SSH_TMUX_CAPABILITIES = {
 /** 安全的 SSH 远程 tmux 命令执行入口；底层统一走系统 ssh + execFile 参数数组。 */
 export async function execSshTmux(profile, args, options) {
     const keyFile = profile.auth.type === "key-file" ? expandUserPath(profile.auth.path) : undefined;
+    const effectiveKnownHosts = options?.overrideKnownHosts
+        ?? (profile.knownHosts !== undefined ? expandUserPath(profile.knownHosts) : undefined);
     return execSshCommand(profile, args, {
         keyFile,
         connectTimeoutMs: profile.connectTimeoutMs,
         execTimeoutMs: options?.timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
-        knownHosts: profile.knownHosts !== undefined ? expandUserPath(profile.knownHosts) : undefined,
+        knownHosts: effectiveKnownHosts,
     });
 }
 /** 生成远程 tmux session 名；rtumcp_ 前缀用于和本地 tumcp_ 区分。 */
@@ -83,6 +86,7 @@ export class SshTmuxProvider {
     commandExecutor;
     sshAvailabilityChecker;
     capabilityCache;
+    keyscanVerifier;
     sshAvailable;
     constructor(logger, options = {}) {
         this.sessions = new Map();
@@ -92,6 +96,7 @@ export class SshTmuxProvider {
         this.commandExecutor = options.commandExecutor ?? execSshTmux;
         this.sshAvailabilityChecker = options.sshAvailabilityChecker ?? isSystemSshAvailable;
         this.capabilityCache = options.capabilityCache ?? remoteCapabilityCache;
+        this.keyscanVerifier = options.keyscanVerifier ?? verifyPinnedFingerprintOrThrow;
         this.sshAvailable = undefined;
     }
     async isAvailable() {
@@ -103,7 +108,15 @@ export class SshTmuxProvider {
     async start(input) {
         await this.ensureSystemSshAvailable();
         const target = await this.resolveSshTmuxTarget(input);
-        const caps = await this.discoverCapabilities(target);
+        // ssh-tmux 使用系统 ssh 命令，无法在握手阶段直接校验 pinnedHostFingerprint；
+        // 通过 ssh-keyscan 预验证：获取远端 host key → 计算 fingerprint → 与 pinned 比对。
+        // 匹配后生成临时 known_hosts 文件供 SSH 连接使用，实现与 ssh-pty 等价的安全保障。
+        let verifiedKnownHosts;
+        if (target.pinnedHostFingerprint !== undefined) {
+            const keyscanResult = await this.keyscanVerifier(target);
+            verifiedKnownHosts = keyscanResult.tempKnownHostsPath;
+        }
+        const caps = await this.discoverCapabilities(target, verifiedKnownHosts);
         const tmuxPath = ensureRemoteTmuxUsable(this.name, target, caps);
         const remoteCwd = assertRemoteCwdAllowed(createRemoteCwdPolicy(target), input.cwd);
         const sessionId = generateSessionId();
@@ -130,16 +143,17 @@ export class SshTmuxProvider {
                 ...envArgs,
                 "--",
                 loginInteractiveCommand,
-            ], "start", sessionId);
+            ], "start", sessionId, verifiedKnownHosts);
             // 远程 tmux 默认可能未开启 mouse mode（与本地不同，无法假设用户配置），
             // 必须 session 级开启以确保 mouse_scroll/mouse_click 序列正确转发。
-            await this.execRemoteTmux(target, tmuxPath, ["set-option", "-t", tmuxId, "mouse", "on"], "set-mouse-on", sessionId);
+            await this.execRemoteTmux(target, tmuxPath, ["set-option", "-t", tmuxId, "mouse", "on"], "set-mouse-on", sessionId, verifiedKnownHosts);
             started = true;
         }
         finally {
             if (!started) {
                 // 远程 start 任一步骤失败时 session 尚未登记；本地 adapter 必须同步释放。
                 xtermAdapter.dispose();
+                cleanupTempKnownHosts(verifiedKnownHosts);
             }
         }
         const session = {
@@ -170,6 +184,7 @@ export class SshTmuxProvider {
             transcript: new TranscriptRecorder(sessionId),
             lastWriteAt: Date.now(),
             snapshotCount: 0,
+            tempKnownHostsPath: verifiedKnownHosts,
         });
         this.logger.info("ssh-tmux session started", {
             sessionId,
@@ -185,12 +200,18 @@ export class SshTmuxProvider {
         if (existing !== undefined)
             return existing.session;
         const attachTarget = await this.resolveAttachTarget(sessionIdOrName);
-        const caps = await this.discoverCapabilities(attachTarget.target);
+        // attach 也需要通过 ssh-keyscan 验证 pinnedHostFingerprint
+        let verifiedKnownHosts;
+        if (attachTarget.target.pinnedHostFingerprint !== undefined) {
+            const keyscanResult = await this.keyscanVerifier(attachTarget.target);
+            verifiedKnownHosts = keyscanResult.tempKnownHostsPath;
+        }
+        const caps = await this.discoverCapabilities(attachTarget.target, verifiedKnownHosts);
         const tmuxPath = ensureRemoteTmuxUsable(this.name, attachTarget.target, caps);
         // 远程 attach 的 session 可能在非 mouse mode 下创建，确保开启。
-        await this.execRemoteTmux(attachTarget.target, tmuxPath, ["set-option", "-t", attachTarget.tmuxId, "mouse", "on"], "set-mouse-on", sessionIdOrName);
-        const dimensions = await this.readDimensionsForTarget(attachTarget.target, tmuxPath, attachTarget.tmuxId, sessionIdOrName);
-        const title = await this.readTitleForTarget(attachTarget.target, tmuxPath, attachTarget.tmuxId, sessionIdOrName);
+        await this.execRemoteTmux(attachTarget.target, tmuxPath, ["set-option", "-t", attachTarget.tmuxId, "mouse", "on"], "set-mouse-on", sessionIdOrName, verifiedKnownHosts);
+        const dimensions = await this.readDimensionsForTarget(attachTarget.target, tmuxPath, attachTarget.tmuxId, sessionIdOrName, verifiedKnownHosts);
+        const title = await this.readTitleForTarget(attachTarget.target, tmuxPath, attachTarget.tmuxId, sessionIdOrName, verifiedKnownHosts);
         const sessionId = generateSessionId();
         const now = new Date().toISOString();
         const cwd = attachTarget.target.defaultCwd ?? "/";
@@ -223,6 +244,7 @@ export class SshTmuxProvider {
             transcript: new TranscriptRecorder(sessionId),
             lastWriteAt: Date.now(),
             snapshotCount: 0,
+            tempKnownHostsPath: verifiedKnownHosts,
         });
         this.logger.info("ssh-tmux session attached", {
             sessionId,
@@ -247,7 +269,7 @@ export class SshTmuxProvider {
         if (screenMode === "full") {
             captureArgs.push("-S", "-5000");
         }
-        const captureResult = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, captureArgs, "snapshot", sessionId);
+        const captureResult = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, captureArgs, "snapshot", sessionId, tracked.tempKnownHostsPath);
         const captureOutput = captureResult.stdout;
         // capture-pane 每次返回完整快照；重建 adapter 可避免重复写入导致 full buffer 累积旧快照。
         tracked.xtermAdapter.dispose();
@@ -337,14 +359,14 @@ export class SshTmuxProvider {
     }
     async type(sessionId, text) {
         const tracked = this.getLiveSession(sessionId);
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", text], "type", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", text], "type", sessionId, tracked.tempKnownHostsPath);
         tracked.transcript.recordInput(text);
         this.touch(tracked);
     }
     async press(sessionId, keyExpr, parsed) {
         const tracked = this.getLiveSession(sessionId);
         const tmuxKey = parsedKeyToTmuxKey(parsed);
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, tmuxKey], "press", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, tmuxKey], "press", sessionId, tracked.tempKnownHostsPath);
         tracked.transcript.recordInput(`[key:${keyExpr}]`);
         this.touch(tracked);
     }
@@ -352,7 +374,7 @@ export class SshTmuxProvider {
         const tracked = this.getLiveSession(sessionId);
         const effectiveMode = mode ?? "line-by-line";
         if (effectiveMode === "raw") {
-            await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", text], "paste", sessionId);
+            await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", text], "paste", sessionId, tracked.tempKnownHostsPath);
             tracked.transcript.recordInput(text);
             this.touch(tracked);
             return;
@@ -361,10 +383,10 @@ export class SshTmuxProvider {
         for (let index = 0; index < lines.length; index += 1) {
             const line = lines[index];
             if (line.length > 0) {
-                await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", line], "paste", sessionId);
+                await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", line], "paste", sessionId, tracked.tempKnownHostsPath);
             }
             if (index < lines.length - 1) {
-                await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "Enter"], "paste-enter", sessionId);
+                await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "Enter"], "paste-enter", sessionId, tracked.tempKnownHostsPath);
                 await this.delay(LINE_PASTE_DELAY_MS);
             }
         }
@@ -381,7 +403,7 @@ export class SshTmuxProvider {
             if (!validation.ok) {
                 throw new TerminalUseError({ code: "UNSAFE_REGEX", message: validation.reason, retryable: false });
             }
-            return new RegExp(pattern, "gu");
+            return createSafeRegex(pattern, "gu");
         })() : undefined;
         for (let row = 0; row < lines.length; row += 1) {
             const line = lines[row];
@@ -407,7 +429,7 @@ export class SshTmuxProvider {
     async scroll(sessionId, direction, lines) {
         const tracked = this.getLiveSession(sessionId);
         const key = direction === "up" ? "Up" : "Down";
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-N", Math.max(1, lines).toString(), key], "scroll", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-N", Math.max(1, lines).toString(), key], "scroll", sessionId, tracked.tempKnownHostsPath);
         this.touch(tracked);
     }
     async mouseClick(sessionId, input) {
@@ -423,7 +445,7 @@ export class SshTmuxProvider {
         };
         const sequence = mouseClickToTmuxSequence(event);
         // send-keys -l 逐字面发送原始序列; tmux 会把序列转发到 pane 内 TUI
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-click", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-click", sessionId, tracked.tempKnownHostsPath);
         tracked.transcript.recordInput(`<mouse:click:${input.button}@${input.col},${input.row}>`);
         this.touch(tracked);
     }
@@ -439,13 +461,13 @@ export class SshTmuxProvider {
             ctrl: input.ctrl,
         };
         const sequence = mouseScrollToTmuxSequence(event);
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-scroll", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["send-keys", "-t", tracked.tmuxId, "-l", sequence], "mouse-scroll", sessionId, tracked.tempKnownHostsPath);
         tracked.transcript.recordInput(`<mouse:scroll:${input.direction}@${input.col},${input.row}>`);
         this.touch(tracked);
     }
     async resize(sessionId, cols, rows) {
         const tracked = this.getLiveSession(sessionId);
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["resize-window", "-t", tracked.tmuxId, "-x", cols.toString(), "-y", rows.toString()], "resize", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["resize-window", "-t", tracked.tmuxId, "-x", cols.toString(), "-y", rows.toString()], "resize", sessionId, tracked.tempKnownHostsPath);
         tracked.xtermAdapter.resize(cols, rows);
         tracked.cols = cols;
         tracked.rows = rows;
@@ -455,7 +477,7 @@ export class SshTmuxProvider {
     async rename(sessionId, label) {
         const tracked = this.getLiveSession(sessionId);
         const safeLabel = sanitizeTmuxSessionName(label);
-        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["rename-session", "-t", tracked.tmuxId, safeLabel], "rename", sessionId);
+        await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["rename-session", "-t", tracked.tmuxId, safeLabel], "rename", sessionId, tracked.tempKnownHostsPath);
         // Map key 也需要随 tmuxId 更新
         this.sessions.delete(tracked.tmuxId);
         tracked.tmuxId = safeLabel;
@@ -466,11 +488,12 @@ export class SshTmuxProvider {
     }
     async kill(sessionId) {
         const tracked = this.assertSessionExists(sessionId);
+        const tempKnownHosts = tracked.tempKnownHostsPath;
         await safeCleanup([
             {
                 name: "remote.kill-session",
                 fn: async () => {
-                    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["kill-session", "-t", tracked.tmuxId], "kill", sessionId);
+                    await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["kill-session", "-t", tracked.tmuxId], "kill", sessionId, tracked.tempKnownHostsPath);
                 },
             },
             {
@@ -484,6 +507,10 @@ export class SshTmuxProvider {
             {
                 name: "xtermAdapter.dispose",
                 fn: () => tracked.xtermAdapter.dispose(),
+            },
+            {
+                name: "cleanupTempKnownHosts",
+                fn: () => cleanupTempKnownHosts(tempKnownHosts),
             },
             {
                 name: "sessions.delete",
@@ -572,14 +599,14 @@ export class SshTmuxProvider {
             throw new DependencyMissingError("ssh", "Install OpenSSH client and ensure ssh is available on PATH");
         }
     }
-    async discoverCapabilities(target) {
+    async discoverCapabilities(target, overrideKnownHosts) {
         const profileName = target.profile ?? target.name;
-        const capabilities = await this.capabilityCache.probeViaTransport(createCapabilityTransport(target), profileName);
+        const capabilities = await this.capabilityCache.probeViaTransport(createCapabilityTransport(target, overrideKnownHosts), profileName);
         this.logger.info("Remote capabilities", { profile: profileName, caps: capabilities });
         return capabilities;
     }
-    async execRemoteTmux(target, tmuxPath, args, action, sessionId) {
-        const result = await this.commandExecutor(target, [tmuxPath, ...args], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS });
+    async execRemoteTmux(target, tmuxPath, args, action, sessionId, overrideKnownHosts) {
+        const result = await this.commandExecutor(target, [tmuxPath, ...args], { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS, overrideKnownHosts });
         if (result.exitCode === 0)
             return result;
         throw this.toRemoteTmuxError(target, result, action, sessionId);
@@ -624,19 +651,19 @@ export class SshTmuxProvider {
         tracked.session.lastActivityAt = new Date().toISOString();
     }
     async readTitle(tracked, sessionId) {
-        const titleResult = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["display-message", "-t", tracked.tmuxId, "-p", "#{session_name}"], "title", sessionId);
+        const titleResult = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["display-message", "-t", tracked.tmuxId, "-p", "#{session_name}"], "title", sessionId, tracked.tempKnownHostsPath);
         return titleResult.stdout.trim();
     }
     async readPaneHistoryLineCount(tracked, sessionId) {
-        const result = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["display-message", "-t", tracked.tmuxId, "-p", "#{history_size}"], "history-size", sessionId);
+        const result = await this.execRemoteTmux(tracked.target, tracked.tmuxPath, ["display-message", "-t", tracked.tmuxId, "-p", "#{history_size}"], "history-size", sessionId, tracked.tempKnownHostsPath);
         return parsePositiveInteger(result.stdout.trim());
     }
-    async readDimensionsForTarget(target, tmuxPath, tmuxId, sessionId) {
-        const result = await this.execRemoteTmux(target, tmuxPath, ["display-message", "-t", tmuxId, "-p", "#{window_width} #{window_height}"], "dimensions", sessionId);
+    async readDimensionsForTarget(target, tmuxPath, tmuxId, sessionId, overrideKnownHosts) {
+        const result = await this.execRemoteTmux(target, tmuxPath, ["display-message", "-t", tmuxId, "-p", "#{window_width} #{window_height}"], "dimensions", sessionId, overrideKnownHosts);
         return parseDimensions(result.stdout);
     }
-    async readTitleForTarget(target, tmuxPath, tmuxId, sessionId) {
-        const titleResult = await this.execRemoteTmux(target, tmuxPath, ["display-message", "-t", tmuxId, "-p", "#{session_name}"], "title", sessionId);
+    async readTitleForTarget(target, tmuxPath, tmuxId, sessionId, overrideKnownHosts) {
+        const titleResult = await this.execRemoteTmux(target, tmuxPath, ["display-message", "-t", tmuxId, "-p", "#{session_name}"], "title", sessionId, overrideKnownHosts);
         return titleResult.stdout.trim();
     }
     async listTmuxSessionsForTarget(target, tmuxPath) {
@@ -740,15 +767,17 @@ function buildTmuxEnvironmentArgs(env) {
 function targetKey(target) {
     return target.profile ?? target.name;
 }
-function createCapabilityTransport(target) {
+function createCapabilityTransport(target, overrideKnownHosts) {
     const keyFile = target.auth.type === "key-file" ? expandUserPath(target.auth.path) : undefined;
+    const effectiveKnownHosts = overrideKnownHosts
+        ?? (target.knownHosts !== undefined ? expandUserPath(target.knownHosts) : undefined);
     return {
         execRemote: async (command, timeoutMs) => {
             const result = await execRemote(target, command, {
                 keyFile,
                 connectTimeoutMs: target.connectTimeoutMs,
                 execTimeoutMs: timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
-                knownHosts: target.knownHosts !== undefined ? expandUserPath(target.knownHosts) : undefined,
+                knownHosts: effectiveKnownHosts,
             });
             return { stdout: result.stdout, stderr: result.stderr };
         },

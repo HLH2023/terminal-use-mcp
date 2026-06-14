@@ -22,14 +22,8 @@ export function createRemoteCwdPolicy(profile: SshHostProfile): RemoteCwdPolicy 
   }
 }
 
-/** 判断 cwd 是否允许；cwd 未传时使用 policy.defaultCwd。 */
-export function isRemoteCwdAllowed(policy: RemoteCwdPolicy, cwd?: string): RemoteCwdSafetyResult {
-  const selected = selectCwd(policy, cwd)
-  if (selected === undefined) {
-    return { ok: false, reason: "Remote CWD is required when profile has no defaultCwd" }
-  }
-
-  const normalizedCwd = normalizeRemotePath(selected)
+/** 核心策略检查：判断已规范化的 cwd 是否满足 allowedRoots/deniedRoots。 */
+export function isRemoteCwdAllowedAgainstPath(policy: RemoteCwdPolicy, normalizedCwd: string): RemoteCwdSafetyResult {
   const allowedRoots = policy.allowedRoots.map(normalizeRemotePath)
   const deniedRoots = policy.deniedRoots.map(normalizeRemotePath)
 
@@ -50,6 +44,17 @@ export function isRemoteCwdAllowed(policy: RemoteCwdPolicy, cwd?: string): Remot
   return { ok: true }
 }
 
+/** 判断 cwd 是否允许；cwd 未传时使用 policy.defaultCwd。 */
+export function isRemoteCwdAllowed(policy: RemoteCwdPolicy, cwd?: string): RemoteCwdSafetyResult {
+  const selected = selectCwd(policy, cwd)
+  if (selected === undefined) {
+    return { ok: false, reason: "Remote CWD is required when profile has no defaultCwd" }
+  }
+
+  const normalizedCwd = normalizeRemotePath(selected)
+  return isRemoteCwdAllowedAgainstPath(policy, normalizedCwd)
+}
+
 /** 解析并返回最终 cwd；不允许时抛 REMOTE_CWD_DENIED。 */
 export function resolveRemoteCwd(policy: RemoteCwdPolicy, cwd?: string): string {
   const selected = selectCwd(policy, cwd)
@@ -64,6 +69,23 @@ export function resolveRemoteCwd(policy: RemoteCwdPolicy, cwd?: string): string 
 /** 语义化别名：用于调用方只关心是否允许并想要统一错误码时。 */
 export function assertRemoteCwdAllowed(policy: RemoteCwdPolicy, cwd?: string): string {
   return resolveRemoteCwd(policy, cwd)
+}
+
+/**
+ * Given a remote canonical path (from `pwd -P`), re-validate against policy.
+ * Returns the canonical path if allowed, or throws RemoteCwdDeniedError.
+ *
+ * This is used after the initial string-based CWD check passes, to guard
+ * against symlink bypass: a path that resolves to a denied directory
+ * through a symlink would pass the string check but fail here.
+ */
+export function validateCanonicalRemoteCwd(policy: RemoteCwdPolicy, canonicalPath: string): string {
+  const normalized = normalizeRemotePath(canonicalPath)
+  const result = isRemoteCwdAllowedAgainstPath(policy, normalized)
+  if (!result.ok) {
+    throw new RemoteCwdDeniedError(normalized, `Canonical path "${normalized}" violates policy: ${result.reason}`)
+  }
+  return normalized
 }
 
 /** 使用 POSIX 风格绝对路径规范化，避免把相对路径锚定到本机 workspace。 */

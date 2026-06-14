@@ -113,20 +113,35 @@ export declare function isCommandSafe(command: string, allowedCommands?: string[
  */
 export declare function isCwdAllowed(cwd: string, workspaceRoot?: string, allowedCwdRoots?: string[]): Promise<CwdSafetyResult>;
 export { isSubdirectory, isSubdirectoryCanonical, normalizePathForComparison };
-/** 用户正则表达式最大允许长度（字符数） */
-export declare const MAX_REGEX_LENGTH = 500;
 export type RegexValidationResult = {
     ok: true;
+    warning?: string;
 } | {
     ok: false;
     reason: string;
+    code: "INVALID_REGEX" | "UNSAFE_REGEX_PATTERN";
 };
 /**
  * 对用户提供的正则表达式做安全验证，防止 ReDoS。
  *
- * 1. 长度截断：超过 MAX_REGEX_LENGTH 直接拒绝
- * 2. 嵌套量词启发式：检测经典 ReDoS 模式，warn 但仍允许（降低误报影响）
+ * 策略分层：
+ * 1. RE2 可用时：用 RE2 编译正则，成功即安全（RE2 保证线性时间执行）。
+ *    不需要任何启发式检查——RE2 在数学上不会发生灾难性回溯。
+ * 2. RE2 不可用时：用嵌套量词启发式检测拒绝已知危险模式。
+ *    这不是完美防护（可能误报也可能漏报），但覆盖了经典 ReDoS 攻击。
  *
- * 注意：该函数不验证正则语法——语法错误交给 new RegExp() 自行抛出。
+ * 注意：500 字符长度限制已移除——RE2 可安全执行任意长度的正则，
+ * 启发式 fallback 下嵌套量词检测比固定长度限制更精准。
  */
 export declare function validateRegexSafety(pattern: string): RegexValidationResult;
+/**
+ * 创建安全的正则表达式对象。
+ *
+ * RE2 可用时返回 RE2 实例（API 兼容 RegExp，保证线性时间），
+ * RE2 不可用时 fallback 到原生 RegExp。
+ * RE2 对象支持 .test()、.exec()、.matchAll() 等方法，可直接替换原生 RegExp。
+ *
+ * @param pattern - 正则表达式模式字符串
+ * @param flags - 正则标志（如 "g"、"gi" 等）
+ */
+export declare function createSafeRegex(pattern: string, flags?: string): RegExp;

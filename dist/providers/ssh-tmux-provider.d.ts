@@ -8,6 +8,8 @@ import type { SystemSshCommandResult } from "./system-ssh-transport.js";
 import { type RemoteCapabilityCache } from "../targets/remote-capability-cache.js";
 export type ExecSshTmuxOptions = {
     timeoutMs?: number;
+    /** 覆盖 profile.knownHosts；用于 ssh-keyscan 验证后生成的临时 known_hosts。 */
+    overrideKnownHosts?: string;
 };
 export type SshTmuxCommandExecutor = (profile: ResolvedSshTarget, args: readonly string[], options?: ExecSshTmuxOptions) => Promise<SystemSshCommandResult>;
 export type SshTmuxProviderOptions = {
@@ -16,6 +18,11 @@ export type SshTmuxProviderOptions = {
     commandExecutor?: SshTmuxCommandExecutor;
     sshAvailabilityChecker?: () => Promise<boolean>;
     capabilityCache?: RemoteCapabilityCache;
+    /** ssh-keyscan fingerprint 验证器；生产默认使用 verifyPinnedFingerprintOrThrow，测试可注入 mock。 */
+    keyscanVerifier?: (profile: ResolvedSshTarget) => Promise<{
+        tempKnownHostsPath: string;
+        matchedFingerprint: string;
+    }>;
 };
 export type SshTmuxListEntry = {
     name: string;
@@ -41,6 +48,7 @@ export declare class SshTmuxProvider implements TerminalProvider {
     private readonly commandExecutor;
     private readonly sshAvailabilityChecker;
     private readonly capabilityCache;
+    private readonly keyscanVerifier;
     private sshAvailable;
     constructor(logger: Logger, options?: SshTmuxProviderOptions);
     isAvailable(): Promise<boolean>;

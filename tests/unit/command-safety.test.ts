@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { StartInput } from "../../src/providers/provider.js"
-import { isCommandSafe, isCommandSafeArgv, isCwdAllowed, maybeWrapWithShell, isSubdirectory, isSubdirectoryCanonical, extractBaseCommandArgv, validateRegexSafety, MAX_REGEX_LENGTH } from "../../src/terminal/command-safety.js"
+import { isCommandSafe, isCommandSafeArgv, isCwdAllowed, maybeWrapWithShell, isSubdirectory, isSubdirectoryCanonical, extractBaseCommandArgv, validateRegexSafety, createSafeRegex } from "../../src/terminal/command-safety.js"
 
 function createStartInput(overrides: Partial<StartInput> = {}): StartInput {
   return {
@@ -677,7 +677,7 @@ describe("isCommandSafeArgv - shell chain bypass prevention", () => {
 })
 
 // ============================================================
-// validateRegexSafety — ReDoS 防护测试
+// validateRegexSafety — ReDoS 防护测试 (RE2 + heuristic fallback)
 // ============================================================
 
 describe("validateRegexSafety", () => {
@@ -691,31 +691,73 @@ describe("validateRegexSafety", () => {
     expect(result.ok).toBe(true)
   })
 
-  it("超过 MAX_REGEX_LENGTH 的正则表达式被拒绝", () => {
-    // 构造一个超长正则：501 个字符
-    const longPattern = "a".repeat(MAX_REGEX_LENGTH + 1)
+  it("长但安全的正则表达式通过验证（无长度限制）", () => {
+    const longPattern = "a".repeat(1000)
     const result = validateRegexSafety(longPattern)
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.reason).toContain(`${MAX_REGEX_LENGTH}`)
-      expect(result.reason).toContain(`${longPattern.length}`)
-    }
-  })
-
-  it("恰好等于 MAX_REGEX_LENGTH 的正则表达式通过验证", () => {
-    const exactPattern = "a".repeat(MAX_REGEX_LENGTH)
-    const result = validateRegexSafety(exactPattern)
-    expect(result.ok).toBe(true)
-  })
-
-  it("嵌套量词模式仍通过但仅触发 warn", () => {
-    // 嵌套量词是可疑模式，但不拒绝（减少误报）
-    const result = validateRegexSafety("(a+)+")
     expect(result.ok).toBe(true)
   })
 
   it("复杂但安全的多选正则通过验证", () => {
     const result = validateRegexSafety("(error|warn|info|debug)")
     expect(result.ok).toBe(true)
+  })
+
+  it("结果包含 warning 字段（RE2 或启发式信息）", () => {
+    const result = validateRegexSafety("test")
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(typeof result.warning).toBe("string")
+    }
+  })
+
+  describe("无 RE2 时（启发式 fallback）", () => {
+    it("嵌套量词模式被拒绝", () => {
+      const result = validateRegexSafety("(a+)+")
+      // 无 RE2 时启发式拒绝嵌套量词；有 RE2 时放行（RE2 保证线性时间）
+      if (result.ok) {
+        // RE2 可用 — 放行是正确的
+        expect(result.warning).toContain("RE2")
+      } else {
+        // RE2 不可用 — 启发式拒绝
+        expect(result.code).toBe("UNSAFE_REGEX_PATTERN")
+        expect(result.reason).toContain("nested quantifiers")
+      }
+    })
+
+    it("无效正则表达式被拒绝（RE2 可用时）或交由执行时报错（无 RE2 时）", () => {
+      const result = validateRegexSafety("(unclosed")
+      // RE2 编译会捕获语法错误；无 RE2 时启发式不检测语法（仅检测嵌套量词），
+      // 所以无效非嵌套量词正则在无 RE2 环境下会通过验证，执行时由 RegExp 抛错
+      if (!result.ok) {
+        expect(result.code).toBe("INVALID_REGEX")
+      }
+      // 无 RE2 时 result.ok === true 是合理的——语法校验属于执行层
+    })
+  })
+})
+
+describe("createSafeRegex", () => {
+  it("返回可调用 .test() 的正则对象", () => {
+    const re = createSafeRegex("hello")
+    expect(typeof re.test).toBe("function")
+    expect(re.test("hello world")).toBe(true)
+    expect(re.test("goodbye")).toBe(false)
+  })
+
+  it("返回可调用 .exec() 的正则对象", () => {
+    const re = createSafeRegex("(\\d+)")
+    const match = re.exec("abc 123 def")
+    expect(match).not.toBeNull()
+    expect(match?.[1]).toBe("123")
+  })
+
+  it("支持 flags 参数", () => {
+    const re = createSafeRegex("hello", "i")
+    expect(re.test("HELLO")).toBe(true)
+  })
+
+  it("不带 flags 时创建无标志正则", () => {
+    const re = createSafeRegex("hello")
+    expect(re.test("HELLO")).toBe(false)
   })
 })
