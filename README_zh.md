@@ -1,718 +1,349 @@
 # terminal-use-mcp
 
-[English](README.md) | 中文
+本地 + 远程终端交互控制 MCP 服务器。让 AI 代理像人类一样控制交互式 TUI 程序。
 
-本地 + 远程终端交互控制 MCP Server。让 AI agent 像人类一样控制交互式终端程序。
+[![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
 
-这不是 shell runner。简单命令用 bash tool 跑，这里只处理需要键盘交互的 TUI 程序。
+这不是 shell 执行器。简单命令请用 bash 工具。本服务器处理需要键盘交互的 TUI 程序：lazygit、vim、htop、Python REPL、调试器、安装向导、外部代理 TUI（Claude Code、Codex CLI、OpenCode）。
 
-## 功能特性
+## 基本概念
 
-- **4 个 Provider**: native-pty / tmux / ssh-pty / ssh-tmux
-- **25 个 MCP Tools**: 22 个 V1 + 3 个 V2 (设计阶段) + tmux_list + tmux_kill
-- **本地 TUI 控制**: lazygit, vim, htop, Python REPL, pdb, 安装器等
-- **远程 SSH 终端控制**: 通过 SSH 控制远程 TUI 和外部 agent (V2, 设计阶段)
-- **安全策略**: 启动命令过滤 / CWD 白名单 / Secret redaction / 确认提示检测
-- **structuredContent 双输出**: 机器可读结构化数据 + 人类可读文本摘要
-- **Session 生命周期管理**: TTL 自动清理 / 操作队列 / Transcript 导出
-- **Host key 严格校验**: known_hosts 或 pinned fingerprint (V2)
+terminal-use-mcp 提供**快照驱动的交互循环**：
+
+```
+snapshot → 分析 → type/press → wait → snapshot
+```
+
+不同于 `tmux send-keys` + `sleep`，服务器直接观察 PTY 渲染事件。`wait_for_text` / `wait_stable` 会阻塞直到程序真正响应 — 无需轮询，无需猜测。
+
+**适用场景**：需要键盘输入的程序 — REPL、调试器、TUI 应用、安装向导、外部编码代理。
+
+**不适用**：简单命令执行 → 用你的 bash 工具。
 
 ## 快速开始
 
-### 前置依赖
+### 前置条件
 
 | 依赖 | 最低版本 | 用途 |
 |------|----------|------|
-| Node.js | 18+ | 运行 MCP server |
+| Node.js | 18+ | 运行 MCP 服务器 |
 | npm | 8+ | 安装依赖 |
-| node-gyp + C++ toolchain | — | 编译 node-pty native addon (可选，缺失时 fallback 到 tmux) |
-| tmux | 3.2+ | tmux provider (可选，缺失时仅 native-pty 可用) |
+| node-gyp + C++ 工具链 | — | 编译 node-pty（可选；缺失时 fallback 到 tmux） |
+| tmux | 3.2+ | tmux 提供者（可选；缺失时仅有 native-pty） |
 
-### 安装
+### MCP 客户端配置
 
-```bash
-cd tools/local/terminal-use-mcp
-npm install
+#### Claude Code / Claude Desktop
+
+添加到 `.mcp.json`（项目根目录）或 `claude_desktop_config.json`：
+
+```json
+{
+  "mcpServers": {
+    "terminal-use": {
+      "command": "npx",
+      "args": ["-y", "terminal-use-mcp"],
+      "env": {
+        "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目路径>",
+        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp"
+      }
+    }
+  }
+}
 ```
 
-`node-pty` 是 native addon，编译需要 node-gyp + C++ toolchain。安装失败时自动 fallback 到 tmux provider。
+#### OpenAI Codex CLI
 
-### 环境变量
+添加到 `.codex/config.json` 的 `mcp_servers` 字段：
 
-| 变量 | 必需 | 默认值 | 说明 |
-|------|------|--------|------|
-| `TERMINAL_USE_WORKSPACE_ROOT` | 是 | `process.cwd()` | CWD 校验根目录 |
-| `TERMINAL_USE_ALLOWED_CWD` | 否 | _(空)_ | 逗号分隔的额外允许目录 |
-| `TERMINAL_USE_SESSION_TTL_MS` | 否 | `3600000` | Session 自动清理超时 (1 小时) |
-
-### MCP Client 配置
-
-根据你使用的客户端选择对应配置：
+```json
+{
+  "mcp_servers": {
+    "terminal-use": {
+      "command": "npx",
+      "args": ["-y", "terminal-use-mcp"],
+      "env": {
+        "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目路径>",
+        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp"
+      }
+    }
+  }
+}
+```
 
 #### OpenCode
 
-在项目根目录 `.opencode/opencode.json` 的 `mcp` 字段中添加：
+添加到 `.opencode/opencode.json` 的 `mcp` 字段：
 
 ```json
 {
   "mcp": {
     "terminal-use": {
       "type": "local",
-      "command": ["npx", "tsx", "tools/local/terminal-use-mcp/src/index.ts"],
-      "cwd": ".",
+      "command": ["npx", "-y", "terminal-use-mcp"],
       "enabled": true,
       "environment": {
-        "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目绝对路径>",
-        "TERMINAL_USE_ALLOWED_CWD": "<你的项目绝对路径>,/tmp"
+        "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目路径>",
+        "TERMINAL_USE_ALLOWED_CWD": "<你的项目路径>,/tmp"
       }
     }
   }
 }
 ```
 
-#### Claude Code
+stdio 传输：stdout 保留给 MCP 协议，所有日志输出到 stderr。SIGINT/SIGTERM 时服务器自动清理所有会话。
 
-在项目根目录 `.mcp.json` 中添加：
+### 复制粘贴安装提示词
 
-```json
-{
-  "mcpServers": {
-    "terminal-use": {
-      "command": "npx",
-      "args": ["tsx", "tools/local/terminal-use-mcp/src/index.ts"],
-      "cwd": "<你的项目绝对路径>",
-      "env": {
-        "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目绝对路径>",
-        "TERMINAL_USE_ALLOWED_CWD": "<你的项目绝对路径>,/tmp"
-      }
-    }
-  }
-}
-```
+将对应提示词粘贴给 AI 代理，即可自主完成安装：
 
-#### Claude Desktop
-
-编辑 `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) 或 `%APPDATA%\Claude\claude_desktop_config.json` (Windows)：
-
-```json
-{
-  "mcpServers": {
-    "terminal-use": {
-      "command": "npx",
-      "args": ["tsx", "tools/local/terminal-use-mcp/src/index.ts"],
-      "cwd": "<你的项目绝对路径>",
-      "env": {
-        "TERMINAL_USE_WORKSPACE_ROOT": "<你的项目绝对路径>",
-        "TERMINAL_USE_ALLOWED_CWD": "<你的项目绝对路径>,/tmp"
-      }
-    }
-  }
-}
-```
-
-stdio transport: stdout 仅用于 MCP 协议，所有日志写 stderr。服务器收到 SIGINT/SIGTERM 时自动清理所有 session。
-
-### 复制提示词安装（给 AI agent 一键安装）
-
-把以下提示词复制给你的 AI agent，它会自主完成安装、配置和验证。
-
-#### OpenCode 用户
+<details>
+<summary>Claude Code</summary>
 
 ```
-请完成 terminal-use-mcp 的安装与接入，步骤如下：
+安装 terminal-use-mcp：
 
-1. 前置检查：
-   - 确认 Node.js 18+ 和 npm 8+ 可用（node -v / npm -v）
-   - 确认项目根目录有 tools/local/terminal-use-mcp/ 目录
+1. 检查 Node.js 18+ 和 npm 8+ 是否可用
 
-2. 安装依赖：
-   - 在 tools/local/terminal-use-mcp/ 下执行 npm install
-   - 如果 node-pty 编译失败，这是正常的（会 fallback 到 tmux provider），不要中断
-
-3. 配置 MCP：
-   - 在项目根目录 .opencode/opencode.json 的 mcp 字段中添加 terminal-use 配置
-   - 配置内容：
-     {
-       "type": "local",
-       "command": ["npx", "tsx", "tools/local/terminal-use-mcp/src/index.ts"],
-       "cwd": ".",
-       "enabled": true,
-       "environment": {
-         "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
-         "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
-       }
-     }
-   - 替换 <当前项目绝对路径> 为实际路径
-
-4. 重启客户端使配置生效
-
-5. 验证安装：
-   - 确认 MCP 工具列表中出现 terminal.health、terminal.start 等工具
-   - 调用 terminal.health 确认 server 和 provider 状态正常
-   - 如果工具不可见，检查 .opencode/opencode.json 是否格式正确，然后重新重启
-
-约束：
-- 不要修改 apps/* 或 packages/*
-- 不要输出任何 secret
-- 仅在 node-pty 编译失败时告知我，其他问题自行处理
-```
-
-#### Claude Code 用户
-
-```
-请完成 terminal-use-mcp 的安装与接入，步骤如下：
-
-1. 前置检查：
-   - 确认 Node.js 18+ 和 npm 8+ 可用（node -v / npm -v）
-   - 确认项目根目录有 tools/local/terminal-use-mcp/ 目录
-
-2. 安装依赖：
-   - 在 tools/local/terminal-use-mcp/ 下执行 npm install
-   - 如果 node-pty 编译失败，这是正常的（会 fallback 到 tmux provider），不要中断
-
-3. 配置 MCP：
-   - 在项目根目录创建或编辑 .mcp.json，添加 terminal-use 配置：
-     {
-       "mcpServers": {
-         "terminal-use": {
-           "command": "npx",
-           "args": ["tsx", "tools/local/terminal-use-mcp/src/index.ts"],
-           "cwd": "<当前项目绝对路径>",
-           "env": {
-             "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
-             "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
-           }
+2. 在项目根目录创建或编辑 .mcp.json，添加：
+   {
+     "mcpServers": {
+       "terminal-use": {
+         "command": "npx",
+         "args": ["-y", "terminal-use-mcp"],
+         "env": {
+           "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
+           "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
          }
        }
      }
-   - 替换 <当前项目绝对路径> 为实际路径
+   }
 
-4. 重启 Claude Code 使配置生效
+3. 重启 Claude Code 使配置生效
 
-5. 验证安装：
-   - 确认 MCP 工具列表中出现 terminal.health、terminal.start 等工具
-   - 调用 terminal.health 确认 server 和 provider 状态正常
-   - 如果工具不可见，检查 .mcp.json 格式是否正确，然后重新重启
+4. 验证：确认 terminal.health 等工具出现在 MCP 工具列表中
 
-约束：
-- 不要修改 apps/* 或 packages/*
-- 不要输出任何 secret
-- 仅在 node-pty 编译失败时告知我，其他问题自行处理
+约束：不要输出任何密钥；node-pty 编译失败才通知我
 ```
 
-#### Claude Desktop 用户
+</details>
+
+<details>
+<summary>Codex CLI</summary>
 
 ```
-请完成 terminal-use-mcp 的安装与接入，步骤如下：
+安装 terminal-use-mcp：
 
-1. 前置检查：
-   - 确认 Node.js 18+ 和 npm 8+ 可用（node -v / npm -v）
-   - 确认项目根目录有 tools/local/terminal-use-mcp/ 目录
+1. 检查 Node.js 18+ 和 npm 8+ 是否可用
 
-2. 安装依赖：
-   - 在 tools/local/terminal-use-mcp/ 下执行 npm install
-   - 如果 node-pty 编译失败，这是正常的（会 fallback 到 tmux provider），不要中断
-
-3. 配置 MCP：
-   - 编辑 Claude Desktop 配置文件：
-     - macOS: ~/Library/Application Support/Claude/claude_desktop_config.json
-     - Windows: %APPDATA%\Claude\claude_desktop_config.json
-   - 在 mcpServers 中添加：
+2. 创建或编辑 .codex/config.json，添加到 mcp_servers：
+   {
      "terminal-use": {
        "command": "npx",
-       "args": ["tsx", "tools/local/terminal-use-mcp/src/index.ts"],
-       "cwd": "<当前项目绝对路径>",
+       "args": ["-y", "terminal-use-mcp"],
        "env": {
          "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
          "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
        }
      }
-   - 替换 <当前项目绝对路径> 为实际路径
+   }
 
-4. 完全退出并重启 Claude Desktop
+3. 重启 Codex CLI 使配置生效
 
-5. 验证安装：
-   - 在对话中确认能看到 terminal-use 提供的工具（terminal.health 等）
-   - 调用 terminal.health 确认 server 状态正常
-   - 如果工具不可见，检查配置文件 JSON 格式和路径拼写
+4. 验证：确认 terminal.health 可用
 
-约束：
-- 不要修改 apps/* 或 packages/*
-- 不要输出任何 secret
-- 仅在 node-pty 编译失败或配置文件找不到时告知我
+约束：不要输出任何密钥；node-pty 编译失败才通知我
 ```
 
-## Provider 介绍
+</details>
 
-| Provider | 用途 | 核心优势 |
-|----------|------|----------|
-| `native-pty` | 大多数交互式 TUI 程序 (默认) | 响应快, snapshot 质量高, 支持 highlights |
-| `tmux` | 需要持久化、断线恢复、多人 attach 的 session | 可 attach, MCP 重启后 session 存活 |
-| `ssh-pty` (V2) | 远程主机上的 TUI 程序 | 复用本地 xterm/snapshot/transcript 体系 |
-| `ssh-tmux` (V2) | 远程持久 session / 断线恢复 / 人类可 attach | 远程 tmux 全生命周期管理 |
-
-Auto 选择规则:
-- 本地: native-pty → tmux
-- 远程 (V2): ssh-pty → ssh-tmux (fallback 时响应标记 `fallbackFrom`)
-
-## MCP Tools 列表
-
-### Session 生命周期 (7 tools)
-
-| Tool | 功能 | 关键参数 |
-|------|------|----------|
-| `terminal.start` | 启动终端 session | `command`, `args?`, `cwd`, `cols?`, `rows?`, `provider?`, `target?` (V2), `env?`, `label?`, `ttlMs?`, `transcript?` |
-| `terminal.attach` | 接入已有 session (tmux) | `sessionId` 或 `tmuxSessionName` |
-| `terminal.list` | 列出所有活跃 session | _(无)_ |
-| `terminal.info` | 查询 session 详情 | `sessionId` |
-| `terminal.rename` | 重命名 session 标签 | `sessionId`, `label` |
-| `terminal.kill` | 终止 session 及其进程 | `sessionId` |
-| `terminal.cleanup` | 清理所有过期 session | _(无)_ |
-
-### 观察 (5 tools)
-
-| Tool | 功能 | 关键参数 |
-|------|------|----------|
-| `terminal.snapshot` | 捕获当前屏幕状态 | `sessionId` |
-| `terminal.wait_for_text` | 等待特定文本出现 | `sessionId`, `text`, `regex?`, `timeoutMs?`, `caseSensitive?` |
-| `terminal.wait_stable` | 等待输出停止变化 | `sessionId`, `idleMs?`, `timeoutMs?` |
-| `terminal.find` | 在屏幕/scrollback 中搜索文本 | `sessionId`, `pattern`, `regex?`, `includeScrollback?` |
-| `terminal.scroll` | 滚动终端视口 | `sessionId`, `direction`, `lines` |
-
-### 输入 (5 tools)
-
-| Tool | 功能 | 关键参数 |
-|------|------|----------|
-| `terminal.type` | 输入文本 | `sessionId`, `text` |
-| `terminal.press` | 发送按键 (支持任意组合键) | `sessionId`, `key` (如 `"ctrl+p"`, `"alt+enter"`, `"f1"`, `"ctrl+shift+f"`) |
-| `terminal.paste` | 粘贴大段文本 (带安全检查) | `sessionId`, `text`, `confirmLargePaste?`, `mode?` |
-| `terminal.mouse_click` | 鼠标点击 (SGR-1006) | `sessionId`, `col`, `row`, `button?` (left/right/middle), `shift?`, `alt?`, `ctrl?` |
-| `terminal.mouse_scroll` | 鼠标滚轮 (SGR-1006) | `sessionId`, `col`, `row`, `direction` (up/down), `lines?` (1-20), `shift?` |
-
-### 元信息 (7 tools)
-
-| Tool | 功能 | 关键参数 |
-|------|------|----------|
-| `terminal.resize` | 改变终端尺寸 | `sessionId`, `cols`, `rows` |
-| `terminal.export_transcript` | 导出 session transcript | `sessionId`, `redact?`, `format?`, `includeSnapshots?` |
-| `terminal.health` | 检查服务器和 provider 状态 | _(无)_ |
-| `terminal.keys` | 列出可用按键表达式 (按类别) | _(无)_ |
-| `terminal.provider_capabilities` | 查询 provider 支持的能力 | `provider` |
-| `terminal.events` | 获取 session 事件历史 | `sessionId`, `limit?`, `sinceSeq?` |
-| `terminal.send_signal` | 发送信号 (SIGINT/SIGTERM/SIGKILL) | `sessionId`, `signal` |
-
-### 远程控制 (3 tools, V2 设计阶段)
-
-| Tool | 功能 | 关键参数 |
-|------|------|----------|
-| `terminal.targets` | 列出可用 target (local + SSH) | _(无)_ |
-| `terminal.target_info` | 查询 target 详情 (脱敏) | `profile` |
-| `terminal.verify_target` | 验证 SSH target 连通性 | `profile` |
-
-## 安全策略
-
-terminal-use-mcp 不是沙箱。安全策略限制启动入口, 不限制 TUI 程序内部行为。
-
-### Command Safety
-
-启动命令 deny 列表:
+<details>
+<summary>OpenCode</summary>
 
 ```
-sudo, su, ssh, scp, sftp, rm, dd, mkfs,
-shutdown, reboot, chmod, chown, curl, wget,
-nc, ncat, telnet
+安装 terminal-use-mcp：
+
+1. 检查 Node.js 18+ 和 npm 8+ 是否可用
+
+2. 在 .opencode/opencode.json 的 mcp 字段中添加：
+   {
+     "type": "local",
+     "command": ["npx", "-y", "terminal-use-mcp"],
+     "enabled": true,
+     "environment": {
+       "TERMINAL_USE_WORKSPACE_ROOT": "<当前项目绝对路径>",
+       "TERMINAL_USE_ALLOWED_CWD": "<当前项目绝对路径>,/tmp"
+     }
+   }
+
+3. 重启 OpenCode 使配置生效
+
+4. 验证：确认 terminal.health 等工具出现在 MCP 工具列表中
+
+约束：不要输出任何密钥；node-pty 编译失败才通知我
 ```
 
-```ts
-// 环境变量覆盖
-TERMINAL_USE_ALLOW_COMMANDS=git,make    // 额外允许
-TERMINAL_USE_DENY_COMMANDS=node,python3  // 额外拒绝
-TERMINAL_USE_RISKY_COMMAND_MODE=deny     // deny | ask | allow
-```
+</details>
 
-`ask` 模式下, 遇到危险命令返回 `CONFIRMATION_REQUIRED`, agent 应停下询问用户。
+## Skills（可选）
 
-**边界**: command policy 只限制 `terminal.start` 的启动命令。TUI 内部子进程、REPL 内 `eval()`/`exec()`、shell 内链式命令不受限。不得把 deny list 当完整沙箱。
+terminal-use-mcp 附带一个**核心 skill**（`terminal-use`），教会 AI 代理如何正确使用 MCP 工具。另外还有**代理专属 skill**，用于控制外部 AI 代理 TUI。按需安装。
 
-### CWD Policy
+| Skill | 目标代理 | 是否必需 | 安装 |
+|------|----------|----------|------|
+| `terminal-use` | 所有代理 | **是**（核心） | 将 `skills/terminal-use/` 复制到项目的 skill 目录 |
+| `tui-claude-code` | Claude Code TUI | 如需远程控制 Claude Code | 复制 `skills/tui-claude-code/` |
+| `tui-codex-cli` | Codex CLI TUI | 如需远程控制 Codex CLI | 复制 `skills/tui-codex-cli/` |
+| `tui-opencode-native` | OpenCode TUI | 如需远程控制 OpenCode | 复制 `skills/tui-opencode-native/` |
+| `tui-opencode-omo` | OpenCode + OmO 插件 | 如需远程控制 OmO 版 OpenCode | 复制 `skills/tui-opencode-omo/` |
 
-本地 CWD 校验:
+> **何时安装代理专属 skill**：仅当你需要**远程控制**另一个 AI 代理的 TUI 时（例如一个代理驱动另一个）。对于普通终端自动化（lazygit、vim、htop、REPL），核心 skill 足够。
 
-```ts
-// 默认允许
-const allowedCwdRoots = [
-  process.cwd(),
-  process.env.TERMINAL_USE_WORKSPACE_ROOT,
-  ...splitCsv(process.env.TERMINAL_USE_ALLOWED_CWD),
-]
+### 自定义与裁剪
 
-// 默认拒绝 (除非在 allowedCwdRoots 子目录下)
-const deniedCwdRoots = ["/", "/root", "/home", "/etc", "/usr", "/var", "/sys", "/proc", "/boot"]
-```
+Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 
-workspace root 是 `$HOME/dev/homelab` 时, `$HOME/dev/homelab/**` 允许, 但整个 `$HOME` 不允许。
+- **裁剪核心 skill**：`terminal-use` 包含 §1-§17。如果仅使用本地终端，删除 §12-§17（远程 SSH）即可。§7（常见模式，~130 行）和 §16（远程操作模式，~150 行）是篇幅最大的章节，如果你的 AI 能在实践中学习，可安全删除。
+- **只安装你需要的代理 skill**：如果从不需要控制 Claude Code，就别安装 `tui-claude-code`。每个代理 skill 完全自包含。
+- **最小核心 skill**：§1 + §3 + §6（约 80 行）覆盖了核心用途、操作循环和安全规则。其余都是参考资料。
 
-远程 CWD (V2) 独立校验, 使用 profile 中的 `remoteAllowedCwd` / `remoteDeniedCwd`, 不复用本地规则。
+每个 SKILL.md 顶部都有**自定义指南**表格，标注了哪些章节可安全删除。
 
-### Secret Redaction
+## 提供者
 
-以下内容在 snapshot 和 transcript 中自动替换为 `<REDACTED_*>`:
+| 提供者 | 适用场景 | 核心优势 |
+|------|----------|----------|
+| `native-pty` | 大多数交互式 TUI 程序（默认） | 快速响应、高质量快照、高亮检测 |
+| `tmux` | 需要持久化、断连恢复、多人 attach 的会话 | 可 attach、MCP 重启后会话存活 |
+| `ssh-pty`（V2） | 远程主机上的 TUI 程序 | 复用本地 xterm/快照/transcript 栈 |
+| `ssh-tmux`（V2） | 持久远程会话、断连恢复、人类可 attach | 完整远程 tmux 生命周期管理 |
 
-```ts
-const SECRET_PATTERNS = [
-  /ghp_[0-9a-zA-Z]{36}/g,           // GitHub PAT
-  /sk-[a-zA-Z0-9]{20}T3BlbkFJ.+/g,  // OpenAI key
-  /sk-ant-[a-zA-Z0-9-]+/g,          // Anthropic key
-  /(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}/g,  // AWS key
-  /Bearer\s+[a-zA-Z0-9\-._~+/]+=*/g,      // Bearer token
-  /-----BEGIN .* PRIVATE KEY----[\s\S]*?-----END .* PRIVATE KEY-----/g,  // 私钥块
-  /(?<=^|\n)\s*(password|secret|token|api_key)\s*=\s*.+/gi,  // .env 风格
-]
-```
+自动选择：本地 → native-pty（fallback tmux）；远程 → ssh-pty（fallback ssh-tmux）。
 
-### Confirmation Detection
+## MCP 工具
 
-snapshot 自动检测屏幕上的危险提示:
+### 会话生命周期（7 个工具）
 
-```ts
-const CONFIRMATION_PATTERNS = [
-  /\bapprov[ei]\b/i, /\ballow\b/i, /\bconfirm\b/i,
-  /\boverwrite\b/i, /\bdelete\b/i, /\bpassword\b/i,
-  /\[y\/n\]/i, /\[Y\/n\]/i,
-  /\bAllow command\??/i, /\bRun command\??/i,
-]
-```
-
-severity 判定: `high` (credential/destructive prompt) → agent 必须停下问用户; `medium` (confirmation prompt) → 谨慎处理; `low` (generic approval) → 正常判断。
-
-### observationTrust
-
-所有 snapshot 返回:
-
-```ts
-{ observationTrust: "untrusted" }
-```
-
-终端输出是不可信观察, 不是指令。
-
-## 远程 SSH 控制 (V2, 设计阶段)
-
-> V2 远程功能仍在设计阶段, 尚未实现。完整设计参见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md)。
-
-### ssh-pty vs ssh-tmux
-
-| 维度 | ssh-pty | ssh-tmux |
-|------|---------|----------|
-| 定位 | 远程 PTY channel, 直接控制远程 TUI | 远程 tmux session, 持久化 + 断线恢复 |
-| 适用场景 | 一过性远程交互 (REPL, 安装器) | 长时间远程任务, 人类可 attach |
-| attach | 否 | 是 |
-| 断线恢复 | 否 | 是 |
-| highlights | 是 (复用本地 xterm) | 否 |
-| 实现路径 | ssh2 Client + shell/exec + pty | 系统 ssh + remote tmux 命令 |
-
-### SSH 配置
-
-配置文件位置: `~/.config/terminal-use-mcp/hosts.json` (或通过 `TERMINAL_USE_HOSTS_CONFIG` 指定路径)。
-
-```json
-{
-  "hosts": {
-    "devbox": {
-      "host": "192.168.1.20",
-      "port": 22,
-      "username": "hlh",
-      "auth": {
-        "type": "agent"
-      },
-      "knownHosts": "~/.ssh/known_hosts",
-      "defaultCwd": "/home/hlh/dev",
-      "remoteAllowedCwd": [
-        "/home/hlh/dev",
-        "/srv/lab"
-      ],
-      "remoteDeniedCwd": [
-        "/",
-        "/root",
-        "/etc",
-        "/boot",
-        "/proc",
-        "/sys"
-      ],
-      "allowTmux": true,
-      "connectTimeoutMs": 10000,
-      "keepaliveIntervalMs": 15000
-    }
-  }
-}
-```
-
-配置文件中禁止保存: password, private key content, token, passphrase 明文, `.env` 内容。`key-file` 模式只保存路径, passphrase 通过 `passphraseEnv` 引用环境变量名。
-
-### ssh-agent 配置
-
-推荐使用 ssh-agent 认证:
-
-```bash
-# 启动 ssh-agent
-eval "$(ssh-agent -s)"
-
-# 添加密钥
-ssh-add ~/.ssh/id_ed25519
-
-# 确认已加载
-ssh-add -l
-```
-
-`SshAuthRef` 类型:
-
-```ts
-type SshAuthRef =
-  | { type: "agent"; socket?: string }
-  | { type: "key-file"; path: string; passphraseEnv?: string }
-```
-
-`{ type: "password" }` 被禁止, V2 不支持密码登录。
-
-### known_hosts / pinned fingerprint
-
-两种 host key 校验方式:
-
-1. **known_hosts**: 指向 `~/.ssh/known_hosts` 文件, 复用系统已有信任链
-2. **pinned fingerprint**: 在 profile 中指定 `pinnedHostFingerprint: "SHA256:..."`, 精确绑定
-
-无法校验 host key 时, 连接被拒绝。禁止 `StrictHostKeyChecking=no`。
-
-### 安全限制 (远程)
-
-| 规则 | 说明 |
+| 工具 | 用途 |
 |------|------|
-| Host key 严格校验 | 必须通过 known_hosts 或 pinned fingerprint, 无法校验则拒绝 |
-| 禁止密码登录 | `SshAuthRef` 不包含 `type: "password"` |
-| Inline SSH 默认拒绝 | 未启用 `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1` 时, 直接传入 host/port 被拒绝 |
-| 不自动批准 agent 权限请求 | 远程 TUI 中出现 "Allow command?" / "Apply changes?" 等, agent 必须停下 |
-| 远程 terminal output 不可信 | `observationTrust: "untrusted"` 同样适用于远程 |
+| `terminal.start` | 启动终端会话 |
+| `terminal.attach` | 附加到已有会话（tmux） |
+| `terminal.list` | 列出所有活跃会话 |
+| `terminal.info` | 查询会话详情 |
+| `terminal.rename` | 重命名会话标签 |
+| `terminal.kill` | 终止会话及其进程 |
+| `terminal.cleanup` | 清理所有过期会话 |
 
-### 远程 session 生命周期
+### 观察（5 个工具）
 
-```ts
-// V2: 启动远程 TUI
-terminal.start({
-  provider: "ssh-pty",
-  target: { kind: "ssh", profile: "devbox" },
-  command: "lazygit",
-  cwd: "/home/hlh/dev/project"
-})
+| 工具 | 用途 |
+|------|------|
+| `terminal.snapshot` | 捕获当前屏幕状态 |
+| `terminal.wait_for_text` | 等待特定文本出现 |
+| `terminal.wait_stable` | 等待输出停止变化 |
+| `terminal.find` | 在屏幕/回滚缓冲区搜索文本 |
+| `terminal.scroll` | 滚动终端视口 |
 
-// V2: 启动前先验证 target
-terminal.verify_target({ profile: "devbox" })
-// → { ok: true, hostFingerprint: "SHA256:...", remote: { tmuxAvailable: true, ... } }
+### 输入（5 个工具）
 
-// V2: 查看可用 target
-terminal.targets({})
-// → { targets: [{ kind: "local", name: "local" }, { kind: "ssh", profile: "devbox", ... }] }
-```
+| 工具 | 用途 |
+|------|------|
+| `terminal.type` | 输入文本 |
+| `terminal.press` | 按键（支持任意组合如 `"ctrl+shift+f"`）|
+| `terminal.paste` | 粘贴大段文本（含安全检查） |
+| `terminal.mouse_click` | 鼠标点击（SGR-1006） |
+| `terminal.mouse_scroll` | 鼠标滚轮（SGR-1006） |
 
-远程 session metadata 记录在 `session.json` 中, 包含 SSH 连接信息、auth 类型、host fingerprint 等。artifact 中禁止写入 private key content / password / token / passphrase / raw env 敏感值。
+### 元信息（7 个工具）
 
-## 安全限制汇总
+| 工具 | 用途 |
+|------|------|
+| `terminal.resize` | 修改终端尺寸 |
+| `terminal.export_transcript` | 导出会话转录 |
+| `terminal.health` | 检查服务器和提供者状态 |
+| `terminal.keys` | 列出可用按键表达式 |
+| `terminal.provider_capabilities` | 查询提供者能力矩阵 |
+| `terminal.events` | 获取会话事件历史 |
+| `terminal.send_signal` | 发送信号（SIGINT/SIGTERM/SIGKILL） |
 
-| 限制 | 本地 (V1) | 远程 (V2) |
-|------|-----------|-----------|
-| Command deny list | 是 | 是 |
-| CWD 白名单 | 是 | 是 (独立策略) |
-| Secret redaction | 是 | 是 (额外脱敏 hostname/username/home path) |
-| Confirmation detection | 是 | 是 (扩展 remote_privilege_prompt / remote_host_key_prompt) |
-| observationTrust | `"untrusted"` | `"untrusted"` |
-| Host key 校验 | N/A | 严格 (known_hosts 或 pinned fingerprint) |
-| 密码登录 | N/A | 禁止 |
-| Inline SSH target | N/A | 默认拒绝, 需显式启用 |
-| Paste 限制 | >2000 字符需确认, >10000 硬限制; 含 secret 直接拒绝 | 同本地 |
+### 远程控制（3 个工具，V2 设计阶段）
 
-## 环境变量
+| 工具 | 用途 |
+|------|------|
+| `terminal.targets` | 列出可用目标（本地 + SSH） |
+| `terminal.target_info` | 查询目标详情（脱敏） |
+| `terminal.verify_target` | 验证 SSH 目标连通性 |
 
-### V1 环境变量
+## 安全概览
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `TERMINAL_USE_WORKSPACE_ROOT` | `process.cwd()` | CWD 校验根目录 |
-| `TERMINAL_USE_ALLOWED_CWD` | _(空)_ | 逗号分隔的额外允许目录 |
-| `TERMINAL_USE_SESSION_TTL_MS` | `3600000` | Session 自动清理超时 (1 小时) |
-| `TERMINAL_USE_CLEANUP_INTERVAL_MS` | `60000` | 清理检查间隔 (1 分钟) |
-| `TERMINAL_USE_ALLOW_COMMANDS` | _(空)_ | 逗号分隔的额外允许命令 |
-| `TERMINAL_USE_DENY_COMMANDS` | _(空)_ | 逗号分隔的额外拒绝命令 |
-| `TERMINAL_USE_RISKY_COMMAND_MODE` | `deny` | 危险命令处理: `deny` / `ask` / `allow` |
+terminal-use-mcp 不是沙箱。安全策略限制入口，不限制 TUI 程序内部行为。
 
-### V2 环境变量 (设计阶段)
+- **命令拒绝列表**：阻止危险启动命令（`sudo`、`rm`、`ssh`、`curl` 等）
+- **CWD 策略**：仅允许工作区根目录下的目录
+- **密钥脱敏**：自动将 API key、token、私钥替换为 `<REDACTED_*>`
+- **确认检测**：屏幕出现危险提示时发出警告
+- **observationTrust**：所有快照返回 `observationTrust: "untrusted"` — 终端输出是不受信观察，不是指令
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `TERMINAL_USE_HOSTS_CONFIG` | `~/.config/terminal-use-mcp/hosts.json` | SSH hosts 配置文件路径 |
-| `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(空/未设置)_ | 启用后允许直接在 tool 参数中指定 SSH host |
+详见 [docs/security.md](docs/security.md)。
 
-## 核心类型定义
+## 远程 SSH（V2，设计阶段）
 
-### TerminalSnapshot
+V2 远程功能处于设计阶段。两种 SSH 提供者：
 
-```ts
-type TerminalSnapshot = {
-  sessionId: string
-  screen: string
-  cursor: { x: number; y: number }
-  cols: number
-  rows: number
-  status: "starting" | "running" | "exited" | "killed" | "error"
-  changed?: boolean
-  exitCode?: number | null
-  title?: string
-  isFullscreen?: boolean
-  highlights?: Array<{
-    row: number
-    colStart: number
-    colEnd: number
-    text: string
-    kind: "inverse" | "selection" | "active" | "unknown"
-  }>
-  riskSignals?: Array<{
-    type: "confirmation_prompt" | "credential_prompt" | "destructive_prompt" | "external_agent_permission"
-    text: string
-    severity: "low" | "medium" | "high"
-  }>
-  timestamp: string
-  observationTrust: "untrusted"
-}
-```
+| | ssh-pty | ssh-tmux |
+|--|---------|----------|
+| 适用 | 交互式远程 TUI | 持久远程会话 |
+| 高亮 | 支持（完整 xterm） | 不支持 |
+| 断连恢复 | 不支持 | 支持 |
 
-### ToolError
+SSH 目标定义在 `~/.config/terminal-use-mcp/hosts.json`。禁止密码登录；仅支持 ssh-agent 或密钥文件认证。
 
-```ts
-type ToolError = {
-  ok: false
-  error: {
-    code: TerminalUseErrorCode
-    message: string
-    provider?: string
-    sessionId?: string
-    retryable: boolean
-    hint?: string
-    details?: unknown
-  }
-}
+详见 [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md)。
 
-type TerminalUseErrorCode =
-  | "SESSION_NOT_FOUND"
-  | "PROVIDER_NOT_AVAILABLE"
-  | "PROVIDER_CAPABILITY_UNSUPPORTED"
-  | "SESSION_TIMEOUT"
-  | "UNSAFE_COMMAND"
-  | "LARGE_PASTE_REFUSED"
-  | "SECRET_DETECTED"
-  | "CONFIRMATION_REQUIRED"
-  | "SESSION_BUSY"
-  | "PROCESS_EXITED"
-  | "DEPENDENCY_MISSING"
-  | "INVALID_CWD"
-  | "INVALID_MOUSE_COORDS"
-  | "INVALID_KEY"
-  | "INTERNAL_ERROR"
-  // V2 新增 (设计阶段)
-  | "SSH_PROFILE_NOT_FOUND"
-  | "SSH_HOST_KEY_MISMATCH"
-  | "SSH_HOST_KEY_UNKNOWN"
-  | "SSH_AUTH_FAILED"
-  | "SSH_CONNECT_TIMEOUT"
-  | "SSH_CONNECTION_LOST"
-  | "SSH_INLINE_TARGET_DENIED"
-  | "REMOTE_CWD_DENIED"
-  | "REMOTE_TMUX_NOT_AVAILABLE"
-  | "REMOTE_COMMAND_DENIED"
-```
+## 延伸阅读
 
-### TerminalTarget (V2, 设计阶段)
-
-```ts
-type TerminalTarget =
-  | { kind: "local" }
-  | {
-      kind: "ssh"
-      profile?: string
-      host?: string
-      port?: number
-      username?: string
-      auth?: SshAuthRef
-      knownHostPolicy?: "strict"
-    }
-```
-
-## 开发命令
-
-```bash
-npm run dev              # 启动 MCP server (tsx 直接运行)
-npm run build            # TypeScript 编译
-npm run typecheck        # 类型检查 (tsc --noEmit)
-npm run test             # 运行全部测试
-npm run test:unit        # 单元测试
-npm run test:contract    # Provider 契约测试
-npm run test:mcp         # MCP stdio smoke 测试
-npm run test:integration # 集成测试
-npm run check            # typecheck + test
-```
-
-## 平台支持
-
-| 平台 | V1 状态 | 说明 |
-|------|---------|------|
-| Linux x86_64 / ARM64 | 支持 | native-pty + tmux 均可用 |
-| macOS Intel / Apple Silicon | 支持 / 尽力 | native-pty 需 Xcode CLI tools; tmux 通过 brew 安装 |
-| WSL2 | 支持 / 尽力 | 同 Linux; 需确认 node-pty 编译 |
-| Native Windows | 不支持 | ConPTY 支持计划在后续版本实现, tmux 不可用 |
-
-## 已知限制
-
-1. native-pty 依赖 node-gyp, 部分环境可能编译失败 (fallback 到 tmux)
-2. `@xterm/headless` 的 highlight 检测是 best-effort
-3. tmux provider 不支持 true color ANSI
-4. Native Windows 不支持 (V1)
-5. Session 不持久化, server 重启丢失
-6. 大粘贴硬限制 10000 字符
-7. 确认检测是正则匹配, 可能误报
+| 主题 | 文档 |
+|------|------|
+| 安全策略、环境变量、拒绝列表 | [docs/security.md](docs/security.md) |
+| 回滚策略、缓冲模式 | [docs/scrollback.md](docs/scrollback.md) |
+| 类型定义、错误码 | [docs/types-and-errors.md](docs/types-and-errors.md) |
+| 远程 SSH V2 设计 | [docs/V2_REMOTE_TERMINAL_GUIDE.md](docs/V2_REMOTE_TERMINAL_GUIDE.md) |
+| 远程 SSH 架构 | [docs/REMOTE_SSH_ARCHITECTURE.md](docs/REMOTE_SSH_ARCHITECTURE.md) |
+| 控制 Claude Code TUI | [docs/TUI_CLAUDE_CODE.md](docs/TUI_CLAUDE_CODE.md) |
+| 控制 Codex CLI TUI | [docs/TUI_CODEX_CLI.md](docs/TUI_CODEX_CLI.md) |
+| 控制 OpenCode TUI | [docs/TUI_OPENCODE_NATIVE.md](docs/TUI_OPENCODE_NATIVE.md) |
+| 控制 OpenCode + OmO | [docs/TUI_OPENCODE_OMO.md](docs/TUI_OPENCODE_OMO.md) |
 
 ## 致谢与参考声明
 
-本项目的开发受到以下开源项目的启发与参考。感谢他们的作者和贡献者。
+本项目受到以下开源项目的启发与参考：
 
 ### 直接参考（代码级启发）
 
 | 项目 | 仓库 | 许可证 | 参考方式 |
 |------|------|--------|----------|
-| [tui-use](https://github.com/onesuper/tui-use) | [onesuper/tui-use](https://github.com/onesuper/tui-use) | MIT | 按键映射格式 (`keymap.ts`)、CLI press 参数命名 (`TUI_USE_NAMED_MAP` / `TUI_USE_FN_MAP`)、屏幕稳定检测语义 (`wait_stable` / `wait_for_text`)。terminal-use-mcp 是独立实现，架构不同 (MCP 服务器 vs. CLI 守护进程; 多 Provider vs. 单一 native-pty)。未复制代码 — 仅适配了按键命名约定和 wait 抽象模式。 |
+| [tui-use](https://github.com/onesuper/tui-use) | [onesuper/tui-use](https://github.com/onesuper/tui-use) | MIT | 按键映射格式和屏幕稳定检测语义。独立实现，非代码复制。 |
 
-### 架构与设计参考（仅文档级参考）
+### 架构参考（仅文档级）
 
-| 项目 | 仓库 | 许可证 | 参考方式 |
-|------|------|--------|----------|
-| [ssh-mcp](https://github.com/n0madic/ssh-mcp) | [n0madic/ssh-mcp](https://github.com/n0madic/ssh-mcp) | MIT | SSH 安全最佳实践参考 (known_hosts, ssh-agent) |
-| [ssh-session-mcp](https://github.com/Zw-awa/ssh-session-mcp) | [Zw-awa/ssh-session-mcp](https://github.com/Zw-awa/ssh-session-mcp) | MIT | 分布式 session owner 架构参考 |
-| [mcp-ssh](https://github.com/xiongjiwei/mcp-ssh) | [xiongjiwei/mcp-ssh](https://github.com/xiongjiwei/mcp-ssh) | MIT | 反面案例参考 (默认关闭 host key 校验) |
-| [terminal-mcp](https://github.com/mkpvishnu/terminal-mcp) | [mkpvishnu/terminal-mcp](https://github.com/mkpvishnu/terminal-mcp) | MIT | PTY 容器方案对比参考 |
+| 项目 | 仓库 | 许可证 |
+|------|------|--------|
+| [ssh-mcp](https://github.com/n0madic/ssh-mcp) | [n0madic/ssh-mcp](https://github.com/n0madic/ssh-mcp) | MIT |
+| [ssh-session-mcp](https://github.com/Zw-awa/ssh-session-mcp) | [Zw-awa/ssh-session-mcp](https://github.com/Zw-awa/ssh-session-mcp) | MIT |
+| [mcp-ssh](https://github.com/xiongjiwei/mcp-ssh) | [xiongjiwei/mcp-ssh](https://github.com/xiongjiwei/mcp-ssh) | MIT |
+| [terminal-mcp](https://github.com/mkpvishnu/terminal-mcp) | [mkpvishnu/terminal-mcp](https://github.com/mkpvishnu/terminal-mcp) | MIT |
 
 ### 运行时依赖
 
-所有运行时和可选依赖均使用宽松许可证 (MIT 或 Apache-2.0)。不存在 GPL/LGPL 等 copyleft 依赖。
+均为宽松许可证（MIT），无 GPL/LGPL 依赖。
 
-| 包名 | 仓库 | 许可证 |
-|------|------|--------|
-| @modelcontextprotocol/sdk | [modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | MIT |
-| ssh2 | [mscdex/ssh2](https://github.com/mscdex/ssh2) | MIT |
-| zod | [colinhacks/zod](https://github.com/colinhacks/zod) | MIT |
-| @xterm/headless | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js) | MIT |
-| @xterm/addon-unicode11 | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js) | MIT |
-| node-pty (可选) | [microsoft/node-pty](https://github.com/microsoft/node-pty) | MIT |
-
-### 参考的标准与规范
-
-- [XTerm Control Sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html) — ANSI 转义序列编码 (SGR-1006 鼠标, C0/C1/SS3 按键)
-- [tmux(1) 手册](https://man7.org/linux/man-pages/man1/tmux.1.html) — `capture-pane`、`send-keys`、`display-message` 格式变量
-- [Model Context Protocol 规范](https://spec.modelcontextprotocol.io/) — MCP 服务器/工具/资源/提示词注册模式
+| 包名 | 许可证 |
+|------|--------|
+| @modelcontextprotocol/sdk | MIT |
+| ssh2 | MIT |
+| zod | MIT |
+| @xterm/headless + addon-unicode11 | MIT |
+| node-pty（可选） | MIT |
 
 ## 许可证
 
