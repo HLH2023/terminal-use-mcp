@@ -154,7 +154,7 @@ type SshPtySession = {
 /**
  * 远端输出脏标记。
  *
- * 抽成小类是为了让 V2-3 单元测试在不建立 SSH 连接的情况下覆盖
+ * 抽成小类是为了让单元测试在不建立 SSH 连接的情况下覆盖
  * markDirty / markClean / lastDataAt 语义。
  */
 export class SshPtyDirtyTracker {

@@ -198,7 +198,7 @@ export class InternalError extends TerminalUseError {
   }
 }
 
-// V2 SSH 错误 — 只表达配置/连接边界，不在 V2-1 建立真实 SSH 连接。
+// SSH 错误 — 只表达配置/连接边界，verify_target 不建立真实 SSH 连接。
 export class SshProfileNotFoundError extends TerminalUseError {
   constructor(profile: string) {
     super({

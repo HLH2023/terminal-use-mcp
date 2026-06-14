@@ -4,7 +4,7 @@
 
 本地 + 远程终端交互控制 MCP 服务器。让 AI 代理像人类一样控制交互式 TUI 程序。
 
-[![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
+[![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 
 | 平台 | 状态 |
 |------|------|
@@ -362,6 +362,8 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 
 ### 环境变量
 
+#### 核心配置
+
 | 变量 | 用途 | 默认值 |
 |------|------|--------|
 | `TERMINAL_USE_PROVIDERS` | 启用 provider 白名单（逗号分隔） | 全部 provider |
@@ -372,6 +374,46 @@ Skill 是纯 Markdown 文件 — **随意编辑**以匹配你的需求：
 | `TERMINAL_USE_ALLOW_COMMANDS` | 允许的命令，即使在内置黑名单中（逗号分隔，覆盖黑名单） | _(空)_ |
 | `TERMINAL_USE_DENY_COMMANDS` | 在内置黑名单之外额外拒绝的命令（逗号分隔） | _(空)_ |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | 黑名单命令处理方式：`deny`、`ask` 或 `allow` | `deny` |
+
+#### 会话与行为
+
+| 变量 | 用途 | 默认值 |
+|------|------|--------|
+| `TERMINAL_USE_SESSION_TTL_MS` | 会话自动清理超时（毫秒） | `3600000`（1 小时） |
+| `TERMINAL_USE_CLEANUP_INTERVAL_MS` | 检查过期会话的间隔（毫秒） | `60000`（1 分钟） |
+| `TERMINAL_USE_DEFAULT_COLS` | 新会话默认终端列数 | `120` |
+| `TERMINAL_USE_DEFAULT_ROWS` | 新会话默认终端行数 | `30` |
+| `TERMINAL_USE_LARGE_PASTE_LIMIT` | 需要确认的粘贴大小阈值（字符数） | `2000` |
+| `TERMINAL_USE_HARD_PASTE_LIMIT` | 硬性粘贴大小上限 — 超过此大小一律拒绝（字符数） | `10000` |
+| `TERMINAL_USE_LOG_LEVEL` | 日志详细度：`debug`、`info`、`warn`、`error` | `info` |
+| `TERMINAL_USE_HOSTS_CONFIG` | SSH 主机配置文件路径 | `~/.config/terminal-use-mcp/hosts.json` |
+| `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | 设为 `1` 允许在工具调用中内联指定 SSH 主机 | _(未设置 — 禁止)_ |
+
+#### 路径覆盖
+
+| 变量 | 用途 | 默认值 |
+|------|------|--------|
+| `TERMINAL_USE_ARTIFACT_DIR` | 覆盖 artifact/transcript 输出目录 | `<包目录>/artifacts` |
+| `TERMINAL_USE_CONFIG_DIR` | 覆盖 XDG 配置目录 | 见下方 XDG/平台默认值 |
+| `TERMINAL_USE_CONFIG_FILE` | 覆盖 config.json 文件路径 | `<配置目录>/config.json` |
+| `TERMINAL_USE_DATA_DIR` | 覆盖 XDG 数据目录（artifact、session 数据） | 见下方 XDG/平台默认值 |
+
+#### XDG / 平台路径
+
+| 变量 | 用途 | 平台 |
+|------|------|------|
+| `XDG_CONFIG_HOME` | XDG 配置主目录 — 应用追加 `terminal-use-mcp/` | Linux, macOS |
+| `XDG_DATA_HOME` | XDG 数据主目录 — 应用追加 `terminal-use-mcp/` | Linux, macOS |
+| `XDG_RUNTIME_DIR` | XDG 运行时目录（用于 SSH agent socket 发现） | Linux |
+| `APPDATA` | Windows 漫游应用数据 — 应用追加 `terminal-use-mcp/` | Windows |
+| `LOCALAPPDATA` | Windows 本地应用数据 — 应用追加 `terminal-use-mcp/` | Windows |
+
+#### SSH 认证
+
+| 变量 | 用途 |
+|------|------|
+| `SSH_AUTH_SOCK` | SSH agent socket 路径（未设置时自动发现；见 ssh-auth.ts 发现链） |
+| `SSH_PROXY_JUMP` | SSH ProxyJump 配置（传递给 SSH 连接） |
 
 ## MCP 工具
 

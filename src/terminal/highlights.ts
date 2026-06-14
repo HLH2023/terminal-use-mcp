@@ -78,7 +78,7 @@ export function mergeHighlightSpans(spans: HighlightSpan[]): HighlightSpan[] {
 /**
  * 判断 cell 是否为高亮。
  *
- * 当前只实现 Phase 2 要求的 best-effort 规则：inverse 一定算高亮；bold 且
+ * 当前实现的 best-effort 规则：inverse 一定算高亮；bold 且
  * 前景色不是默认色时，视为 active 高亮。selection 等更复杂信号留给后续
  * xterm-adapter 在构造 CellAttributes 时扩展。
  */

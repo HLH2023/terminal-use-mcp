@@ -24,7 +24,7 @@ import { realpath } from "node:fs/promises"
 // path.relative 用于 canonical path 子目录判断，比 startsWith 更准确：
 // relative("/a", "/a/b") → "b"（子目录），relative("/a", "/a") → ""（相等），
 // relative("/a", "/abc") → "../bc"（非子目录，含 ".." 前缀）。
-import { relative } from "node:path"
+import { basename, isAbsolute, relative, resolve, sep, win32 } from "node:path"
 
 export type CommandSafetyResult =
   | { ok: true }
@@ -38,9 +38,15 @@ const DEFAULT_DENIED_COMMANDS = [
   "sudo", "su", "sh", "ssh", "scp", "sftp", "rm", "dd", "mkfs",
   "shutdown", "reboot", "chmod", "chown", "curl", "wget",
   "nc", "ncat", "telnet",
+  "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe",
+  "del", "erase", "rmdir", "rd", "format", "diskpart",
+  "reg", "reg.exe", "takeown", "icacls", "net", "net.exe",
+  "netsh", "netsh.exe", "sc", "sc.exe", "taskkill", "taskkill.exe",
 ]
 
-const DEFAULT_DENIED_CWD_ROOTS = ["/", "/root", "/home", "/etc", "/usr", "/var", "/sys", "/proc", "/boot"]
+const DEFAULT_DENIED_CWD_ROOTS = process.platform === "win32"
+  ? ["C:\\", "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)", "C:\\ProgramData"]
+  : ["/", "/root", "/home", "/etc", "/usr", "/var", "/sys", "/proc", "/boot"]
 
 // shell 包装触发字符：空白字符（含空格和换行）或 POSIX shell 中会改变解析语义的元字符。
 // 注意：该正则只用于判断"是否需要交给 shell 解析"，安全判定仍必须基于包装前的原始命令。
@@ -309,7 +315,7 @@ export function extractBaseCommandArgv(argv: string[]): string {
 
   while (tokens.length > 0) {
     const wrapper = tokens[0] ?? ""
-    const wrapperBase = wrapper.split("/").pop() ?? wrapper
+    const wrapperBase = basenameCrossPlatform(wrapper)
     if (!KNOWN_WRAPPERS.includes(wrapperBase)) {
       break
     }
@@ -320,7 +326,11 @@ export function extractBaseCommandArgv(argv: string[]): string {
   }
 
   const base = tokens[0] ?? ""
-  return base.split("/").pop() ?? base
+  return basenameCrossPlatform(base)
+}
+
+function basenameCrossPlatform(pathValue: string): string {
+  return win32.basename(basename(pathValue))
 }
 
 // ============================================================
@@ -368,8 +378,8 @@ function isSubdirectory(childPath: string, parentPath: string): boolean {
 function isSubdirectoryCanonical(childCanonical: string, parentCanonical: string): boolean {
   if (childCanonical === parentCanonical) return true
   const rel = relative(parentCanonical, childCanonical)
-  // rel 非空、不以 ".." 开头（不在 parent 之外）、不以 "/" 开头（不在不同挂载点）
-  return rel.length > 0 && !rel.startsWith("..") && !rel.startsWith("/")
+  // rel 非空、不以 ".." 开头（不在 parent 之外）、不是绝对路径（不同挂载点/盘符）。
+  return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel)
 }
 
 /**
@@ -393,7 +403,7 @@ export function maybeWrapWithShell(input: StartInput): StartInput {
   }
 
   const shell = process.platform === "win32"
-    ? (process.env.ComSpec ?? "cmd.exe")
+    ? (process.env.ComSpec?.trim() || "cmd.exe")
     : "/bin/sh"
   const shellArgs = process.platform === "win32"
     ? ["/c", input.command]
@@ -519,7 +529,7 @@ export async function isCwdAllowed(
   workspaceRoot: string = process.cwd(),
   allowedCwdRoots: string[] = []
 ): Promise<CwdSafetyResult> {
-  const resolved = cwd.startsWith("/") ? cwd : new URL(cwd, `file://${workspaceRoot}/`).pathname
+  const resolved = isAbsolute(cwd) ? cwd : resolve(workspaceRoot, cwd)
 
   // 对 CWD 做 realpath canonicalize
   let canonicalCwd: string
@@ -544,6 +554,7 @@ export async function isCwdAllowed(
       canonicalAllowedRoots.push(await realpath(root))
     } catch {
       // extra root 不存在时跳过，不做 fail-closed——配置可能包含未创建的路径
+      continue
     }
   }
 
@@ -570,7 +581,8 @@ export async function isCwdAllowed(
     }
     // 使用 canonical path 与 denied root 比较
     const normalizedDenied = normalizePathForComparison(denied)
-    if (canonicalCwd === normalizedDenied || canonicalCwd.startsWith(normalizedDenied + "/")) {
+    const deniedBoundary = normalizedDenied.endsWith(sep) ? normalizedDenied : `${normalizedDenied}${sep}`
+    if (canonicalCwd === normalizedDenied || canonicalCwd.startsWith(deniedBoundary)) {
       // workspaceRoot 本身就在该 denied root 下，已经在上面通过了
       if (isSubdirectoryCanonical(canonicalRoot, normalizedDenied)) {
         continue

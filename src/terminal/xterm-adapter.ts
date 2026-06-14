@@ -274,6 +274,7 @@ export class XtermAdapter {
       this.terminal.unicode.activeVersion = "11"
     } catch {
       // best-effort：缺失 addon 或运行时不兼容都不阻断 terminal-use-mcp。
+      return
     }
   }
 

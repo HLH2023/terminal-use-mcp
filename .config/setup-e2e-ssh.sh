@@ -3,7 +3,7 @@
 # terminal-use-mcp E2E SSH 环境准备脚本
 # ──────────────────────────────────────────────────────────────────
 # 用途：配置 localhost SSH 自测环境，让 agent 可以通过 SSH 连接本机
-#       进行 V2 远程终端控制的 E2E 测试
+#       进行远程终端控制的 E2E 测试
 #
 # 前置条件：
 #   1. sshd 已运行 (systemctl is-active sshd)

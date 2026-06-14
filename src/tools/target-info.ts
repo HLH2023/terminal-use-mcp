@@ -54,7 +54,7 @@ type TargetInfoOutput = {
   }
 }
 
-type V2ToolErrorCode = "SSH_PROFILE_NOT_FOUND"
+type SshToolErrorCode = "SSH_PROFILE_NOT_FOUND"
 
 export function registerTargetInfoTool(
   server: McpServer,
@@ -88,7 +88,7 @@ export function registerTargetInfoTool(
 function getRequiredProfile(hostsConfig: ReadonlyMap<string, SshHostProfile>, profileName: string): SshHostProfile {
   const profile = getSshProfile(hostsConfig, profileName)
   if (profile === undefined) {
-    throw createV2ToolError(
+    throw createSshToolError(
       "SSH_PROFILE_NOT_FOUND",
       `SSH profile not found: ${profileName}`,
       `Configure profile ${profileName} in hosts.json before using terminal.target_info`,
@@ -137,6 +137,6 @@ function redactAuth(profile: SshHostProfile): RedactedAuthInfo {
   }
 }
 
-function createV2ToolError(code: V2ToolErrorCode, message: string, hint: string): TerminalUseError {
+function createSshToolError(code: SshToolErrorCode, message: string, hint: string): TerminalUseError {
   return new TerminalUseError({ code: code as TerminalUseErrorCode, message, retryable: false, hint })
 }

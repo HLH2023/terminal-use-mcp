@@ -54,7 +54,7 @@ C++ toolchain to compile.
 
 3. **Set provider to tmux globally** via env var:
    ```
-   TERMINAL_USE_PROVIDER=tmux
+   TERMINAL_USE_PROVIDERS=tmux
    ```
 
 The server automatically falls back to tmux if `node-pty` fails to load, so

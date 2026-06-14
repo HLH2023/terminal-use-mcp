@@ -1,5 +1,5 @@
 /**
- * SSH hosts 配置加载器（V2 配置改造版）
+ * SSH hosts 配置加载器
  *
  * 支持三种配置来源（按优先级）：
  * 1. 旧格式 hosts.json —— 一次性包含所有 SSH profile（向后兼容）
@@ -25,8 +25,8 @@ import { homedir } from "node:os"
 
 import { logger } from "../logger.js"
 import type { SshAuthRef, SshHostProfile } from "./target-types.js"
-import { expandTildePath, expandUserPath } from "./ssh-host-config-helpers.js"
-import { getConfigDir, getProfilesDir } from "./xdg-paths.js"
+import { expandTildePath } from "./ssh-host-config-helpers.js"
+import { getConfigDir } from "./xdg-paths.js"
 import { SshHostProfileSchema, SshProfileOverlaySchema, expandEnvVars, expandTildeInObject } from "./config-schema.js"
 import { parseSshConfig, findSshConfigEntry } from "./ssh-config-parser.js"
 

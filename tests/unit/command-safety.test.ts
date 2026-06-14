@@ -171,6 +171,49 @@ describe("maybeWrapWithShell", () => {
   })
 })
 
+describe("maybeWrapWithShell - Windows", () => {
+  const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")
+  const originalComSpec = process.env.ComSpec
+
+  afterEach(() => {
+    if (originalPlatformDescriptor !== undefined) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor)
+    }
+    if (originalComSpec !== undefined) {
+      process.env.ComSpec = originalComSpec
+    } else {
+      delete process.env.ComSpec
+    }
+  })
+
+  it("uses ComSpec on win32", () => {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+    process.env.ComSpec = "C:\\Windows\\System32\\cmd.exe"
+
+    const result = maybeWrapWithShell(createStartInput({
+      command: "echo hello && echo world",
+      args: [],
+      cwd: "/tmp",
+    }))
+
+    expect(result.command).toBe("C:\\Windows\\System32\\cmd.exe")
+    expect(result.args).toEqual(["/c", "echo hello && echo world"])
+  })
+
+  it("falls back to cmd.exe when ComSpec is empty", () => {
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+    process.env.ComSpec = ""
+
+    const result = maybeWrapWithShell(createStartInput({
+      command: "echo hello && echo world",
+      args: [],
+      cwd: "/tmp",
+    }))
+
+    expect(result.command).toBe("cmd.exe")
+  })
+})
+
 describe("isCwdAllowed", () => {
   let tempDir: string
   let workspaceRoot: string
@@ -364,6 +407,32 @@ describe("isCommandSafeArgv (H2 完整 argv 检查)", () => {
   })
 })
 
+describe("isCommandSafeArgv - Windows denylist", () => {
+  it("blocks powershell.exe", () => {
+    expect(isCommandSafeArgv("powershell.exe", [])).toEqual({
+      ok: false,
+      reason: expect.stringContaining("powershell.exe"),
+      code: "UNSAFE_COMMAND",
+    })
+  })
+
+  it("blocks cmd.exe", () => {
+    expect(isCommandSafeArgv("cmd.exe", [])).toEqual({
+      ok: false,
+      reason: expect.stringContaining("cmd.exe"),
+      code: "UNSAFE_COMMAND",
+    })
+  })
+
+  it("blocks diskpart", () => {
+    expect(isCommandSafeArgv("diskpart", [])).toEqual({
+      ok: false,
+      reason: expect.stringContaining("diskpart"),
+      code: "UNSAFE_COMMAND",
+    })
+  })
+})
+
 describe("extractBaseCommandArgv", () => {
   it("无 wrapper 直接返回 base", () => {
     expect(extractBaseCommandArgv(["ls", "-la"])).toBe("ls")
@@ -395,6 +464,16 @@ describe("extractBaseCommandArgv", () => {
 
   it("嵌套 wrapper: env nice -n 19 rm 剥除后返回 rm", () => {
     expect(extractBaseCommandArgv(["env", "nice", "-n", "19", "rm"])).toBe("rm")
+  })
+})
+
+describe("extractBaseCommandArgv - Windows paths", () => {
+  it("extracts basename from Windows absolute path", () => {
+    expect(extractBaseCommandArgv(["C:\\Windows\\System32\\cmd.exe"])).toBe("cmd.exe")
+  })
+
+  it("extracts basename from backslash path with args", () => {
+    expect(extractBaseCommandArgv(["C:\\Program Files\\PowerShell\\pwsh.exe", "-Command", "echo hi"])).toBe("pwsh.exe")
   })
 })
 

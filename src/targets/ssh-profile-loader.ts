@@ -45,7 +45,7 @@ export function resolveSshTarget(target: TerminalTarget, hostsConfig: ReadonlyMa
   return resolveInlineTarget(target)
 }
 
-/** 兼容 V2-2 target tools 的只读 profile 查询入口。 */
+/** 只读 SSH profile 查询入口（供 verify_target 等工具使用）。 */
 export function getSshProfile(hostsConfig: ReadonlyMap<string, SshHostProfile>, profileName: string): SshHostProfile | undefined {
   return hostsConfig.get(profileName)
 }

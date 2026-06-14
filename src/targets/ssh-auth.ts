@@ -7,7 +7,7 @@
  * - key-file 只检查路径可读，不读取私钥内容。
  * - passphrase 只检查环境变量是否存在，不读取变量值。
  *
- * V2 配置改造增强 SSH_AUTH_SOCK 发现链：
+ * SSH_AUTH_SOCK 发现链：
  * 1. auth.socket（profile 中显式指定，最高优先）
  * 2. SSH_AUTH_SOCK 环境变量（MCP 客户端传入）
  * 3. XDG_RUNTIME_DIR/ssh-agent.socket（systemd user service）
@@ -121,15 +121,15 @@ async function pathExists(candidatePath: string): Promise<boolean> {
 /**
  * 运行时扫描 ssh-agent UNIX socket（兜底发现）。
  *
- * 使用 `ss -xU` 列出 UNIX domain socket，搜索含 "agent" 的路径。
+ * 使用 `ss -x` 列出 UNIX domain socket，搜索含 "agent" 的路径。
  * 不会读取 socket 内容、不会发送任何数据。
  * 失败时静默返回 undefined——不抛异常、不影响主流程。
  */
 function scanAgentSocket(): string | undefined {
   try {
-    // ss -xU = 列出已连接的 UNIX domain sockets
+    // ss -x = 列出 UNIX domain sockets
     // --no-header = 不输出表头
-    const output = execFileSync("ss", ["-xU", "--no-header"], {
+    const output = execFileSync("ss", ["-x", "--no-header"], {
       timeout: 2000,
       encoding: "utf8",
       maxBuffer: 64 * 1024,

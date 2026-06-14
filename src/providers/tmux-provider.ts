@@ -108,7 +108,8 @@ export class TmuxProvider implements TerminalProvider {
 
     try {
       const result = await this.execTmux(["-V"])
-      this.tmuxAvailable = result.stdout.includes("tmux")
+      const version = parseTmuxVersion(result.stdout)
+      this.tmuxAvailable = version !== undefined && isSupportedTmuxVersion(version)
       return this.tmuxAvailable
     } catch {
       this.tmuxAvailable = false
@@ -730,4 +731,27 @@ function parsePositiveInteger(value: string): number | undefined {
   if (!/^\d+$/u.test(value)) return undefined
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+type TmuxVersion = {
+  major: number
+  minor: number
+}
+
+function parseTmuxVersion(output: string): TmuxVersion | undefined {
+  const versionMatch = output.match(/tmux\s+(\d+)\.(\d+)/u)
+  if (versionMatch === null) return undefined
+
+  const majorRaw = versionMatch[1]
+  const minorRaw = versionMatch[2]
+  if (majorRaw === undefined || minorRaw === undefined) return undefined
+
+  return {
+    major: Number.parseInt(majorRaw, 10),
+    minor: Number.parseInt(minorRaw, 10),
+  }
+}
+
+function isSupportedTmuxVersion(version: TmuxVersion): boolean {
+  return version.major > 3 || (version.major === 3 && version.minor >= 2)
 }

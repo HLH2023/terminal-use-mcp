@@ -4,7 +4,6 @@
  * 扫描终端屏幕文本，识别需要用户注意的风险信号。
  */
 
-import type { TerminalUseErrorCode } from "./errors.js"
 
 export type RiskSignal = {
   type: "confirmation_prompt" | "credential_prompt" | "destructive_prompt" | "external_agent_permission"

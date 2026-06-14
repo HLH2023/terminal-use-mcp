@@ -1,10 +1,10 @@
 /**
- * V2 终端目标与 SSH Profile 类型
+ * 终端目标与 SSH Profile 类型
  *
  * 这里仅定义"在哪里运行"的目标与远程 profile 契约，不做任何真实 SSH 连接。
  * 安全原则：认证只允许引用 agent 或 key-file 路径，禁止密码与私钥内容进入配置。
  *
- * V2 配置改造新增：
+ * 配置扩展：
  * - sshConfigHost：指向 OpenSSH ~/.ssh/config 中的 Host 别名，
  *   SSH 连接参数（Host/Port/User/IdentityFile）从该处解析，不重复配置。
  * - SshAuthRef agent 的 socket 支持自动发现链。

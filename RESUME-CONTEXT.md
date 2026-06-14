@@ -8,9 +8,9 @@
 
 ## 当前进度
 ### 已完成
-- Phase 0 (脚手架): package.json / tsconfig.json / npm install / artifacts/.gitignore / 入口空壳
-- Phase 1 (核心类型): errors.ts / ids.ts / keymap.ts / redact.ts / confirm-detection.ts / command-safety.ts / terminal-snapshot.ts / provider.ts / config.ts / logger.ts
-- Phase 11 (Test fixtures): ask-name.js / menu-app.js / confirm-app.js / spinner-app.js / secret-output.js / fullscreen-tui.js
+- 开发阶段 0 (脚手架): package.json / tsconfig.json / npm install / artifacts/.gitignore / 入口空壳
+- 开发阶段 1 (核心类型): errors.ts / ids.ts / keymap.ts / redact.ts / confirm-detection.ts / command-safety.ts / terminal-snapshot.ts / provider.ts / config.ts / logger.ts
+- 开发阶段 11 (Test fixtures): ask-name.js / menu-app.js / confirm-app.js / spinner-app.js / secret-output.js / fullscreen-tui.js
 - DEV-PLAN.md 生产级修订 (9 轮校验)
 - SKILL.md (local-tool-development 范式编写完成)
 - AGENTS.md 追加 (tools/local/ 规则、local-tool 分类、skill 索引、大任务豁免、独立工具验收)
@@ -20,19 +20,19 @@
 - (无 — 开发暂停，范式补完完毕)
 
 ### 待办 (按优先级)
-1. Phase 2: Terminal 层 — xterm-adapter.ts / screen-buffer.ts / highlights.ts / wait.ts / transcript.ts
-2. Phase 3: SessionManager + PromiseQueue + TTL cleanup
-3. Phase 4: NativePtyProvider (node-pty + @xterm/headless)
-4. Phase 5: TmuxProvider (tmux 3.2+ required)
-5. Phase 6: 已取消（冗余外部 CLI provider 已删除）
-6. Phase 7: 22 MCP tools 注册
-7. Phase 8: MCP Resources + Prompts
-8. Phase 9: MCP Server 完整入口
-9. Phase 10: Unit tests
-12: Phase 12: Provider contract + MCP smoke tests
-10. Phase 13: SKILL.md (terminal-use-local skill，非 local-tool-development 范式)
-11. Phase 14: Examples
-12. Phase 15: 验证 + 最终报告
+1. Terminal 层 — xterm-adapter.ts / screen-buffer.ts / highlights.ts / wait.ts / transcript.ts
+2. SessionManager + PromiseQueue + TTL cleanup
+3. NativePtyProvider (node-pty + @xterm/headless)
+4. TmuxProvider (tmux 3.2+ required)
+5. 已取消（冗余外部 CLI provider 已删除）
+6. 22 MCP tools 注册
+7. MCP Resources + Prompts
+8. MCP Server 完整入口
+9. Unit tests
+12. Provider contract + MCP smoke tests
+10. SKILL.md (terminal-use-local skill，非 local-tool-development 范式)
+11. Examples
+12. 验证 + 最终报告
 
 ## 关键决策
 - 22 tools 总数 (7 lifecycle + 5 observation + 3 input + 7 meta)，新增 terminal.events 和 terminal.send_signal
@@ -75,7 +75,7 @@
 - 不修改 HomeLab 主业务代码
 - 不绑定 HL-P*-T* 大任务
 - 不自动安装全局依赖 (tui-use 等)
-- 不做 Native Windows 支持 (v2)
-- 不做 session 持久化/恢复 (v2+)
+- 不做 Native Windows 支持 (ConPTY，参见 §18)
+- 不做 session 持久化/恢复 (远期)
 - 不做完整沙箱 (command policy 只限制 terminal.start 的启动命令)
 - 已删除的 xterm-adapter.ts 不需要恢复，按范式重新实现即可

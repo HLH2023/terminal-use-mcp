@@ -14,7 +14,7 @@ import type { ProviderName, TerminalProvider } from "./providers/provider.js"
 import type { SshHostProfile } from "./targets/target-types.js"
 import { ProviderExecutor } from "./tools/tool-helpers.js"
 
-// ── 22 V1 tools ────────────────────────────────────────────────
+// ── 22 Session tools ───────────────────────────────────────────
 import { registerStartTool } from "./tools/start.js"
 import { registerAttachTool } from "./tools/attach.js"
 import { registerListTool } from "./tools/list.js"
@@ -42,12 +42,12 @@ import { registerProviderCapabilitiesTool } from "./tools/provider-capabilities.
 import { registerEventsTool } from "./tools/events.js"
 import { registerSendSignalTool } from "./tools/send-signal.js"
 
-// ── 3 V2 remote target tools ──────────────────────────────────
+// ── 3 Remote target tools ─────────────────────────────────────
 import { registerTargetsTool } from "./tools/targets.js"
 import { registerTargetInfoTool } from "./tools/target-info.js"
 import { registerVerifyTargetTool } from "./tools/verify-target.js"
 
-// ── 2 V2 tmux management tools ─────────────────────────────────
+// ── 2 Tmux management tools ──────────────────────────────────
 import { registerTmuxListTool } from "./tools/tmux-list.js"
 import { registerTmuxKillTool } from "./tools/tmux-kill.js"
 
@@ -129,12 +129,12 @@ export function createMcpServer(
   registerEventsTool(server, executor)
   registerSendSignalTool(server, executor)
 
-  // ── V2 remote targets (3) ──
+  // ── Remote targets (3) ──
   registerTargetsTool(server, hostsConfig, logger)
   registerTargetInfoTool(server, hostsConfig, logger)
   registerVerifyTargetTool(server, sm, hostsConfig, logger)
 
-  // ── V2 tmux management (2) ──
+  // ── Tmux management (2) ──
   registerTmuxListTool(server, executor, logger, hostsConfig)
   registerTmuxKillTool(server, executor, logger, hostsConfig)
 

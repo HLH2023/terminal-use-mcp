@@ -4,7 +4,7 @@
 
 Local + remote terminal interaction control MCP Server. Lets AI agents control interactive TUI programs the way a human would.
 
-[![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
+[![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 
 | Platform | Status |
 |----------|--------|
@@ -380,6 +380,8 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 
 ### Environment Variables
 
+#### Core Configuration
+
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `TERMINAL_USE_PROVIDERS` | Enabled provider whitelist (CSV) | All providers |
@@ -390,6 +392,46 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_ALLOW_COMMANDS` | Commands allowed even if on deny list (CSV, overrides deny) | _(empty)_ |
 | `TERMINAL_USE_DENY_COMMANDS` | Extra denied commands beyond built-in list (CSV) | _(empty)_ |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | How to handle denied commands: `deny`, `ask`, or `allow` | `deny` |
+
+#### Session & Behavior
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `TERMINAL_USE_SESSION_TTL_MS` | Session auto-cleanup timeout (ms) | `3600000` (1 hour) |
+| `TERMINAL_USE_CLEANUP_INTERVAL_MS` | How often to check for expired sessions (ms) | `60000` (1 min) |
+| `TERMINAL_USE_DEFAULT_COLS` | Default terminal columns for new sessions | `120` |
+| `TERMINAL_USE_DEFAULT_ROWS` | Default terminal rows for new sessions | `30` |
+| `TERMINAL_USE_LARGE_PASTE_LIMIT` | Paste size threshold requiring confirmation (characters) | `2000` |
+| `TERMINAL_USE_HARD_PASTE_LIMIT` | Hard paste size limit — pastes above this are always refused (characters) | `10000` |
+| `TERMINAL_USE_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` | `info` |
+| `TERMINAL_USE_HOSTS_CONFIG` | Path to SSH host profiles configuration file | `~/.config/terminal-use-mcp/hosts.json` |
+| `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | Set to `1` to allow inline SSH host specification in tool calls | _(not set — denied)_ |
+
+#### Path Overrides
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `TERMINAL_USE_ARTIFACT_DIR` | Override artifact/transcript output directory | `<package-dir>/artifacts` |
+| `TERMINAL_USE_CONFIG_DIR` | Override XDG config directory | See XDG/platform defaults below |
+| `TERMINAL_USE_CONFIG_FILE` | Override config.json file path | `<config-dir>/config.json` |
+| `TERMINAL_USE_DATA_DIR` | Override XDG data directory (artifact, session data) | See XDG/platform defaults below |
+
+#### XDG / Platform Paths
+
+| Variable | Purpose | Platform |
+|----------|---------|----------|
+| `XDG_CONFIG_HOME` | XDG config home — app appends `terminal-use-mcp/` | Linux, macOS |
+| `XDG_DATA_HOME` | XDG data home — app appends `terminal-use-mcp/` | Linux, macOS |
+| `XDG_RUNTIME_DIR` | XDG runtime directory (used for SSH agent socket discovery) | Linux |
+| `APPDATA` | Windows roaming app data — app appends `terminal-use-mcp/` | Windows |
+| `LOCALAPPDATA` | Windows local app data — app appends `terminal-use-mcp/` | Windows |
+
+#### SSH Authentication
+
+| Variable | Purpose |
+|----------|---------|
+| `SSH_AUTH_SOCK` | SSH agent socket path (discovered automatically if not set; see ssh-auth.ts discovery chain) |
+| `SSH_PROXY_JUMP` | SSH ProxyJump configuration (passed to SSH connection) |
 
 ## MCP Tools
 

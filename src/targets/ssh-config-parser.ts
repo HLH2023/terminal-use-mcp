@@ -231,7 +231,7 @@ function isWildcardMatch(candidate: string, pattern: string): boolean {
   // 将通配符转为正则
   const regexStr = pattern
     .split(/([*?])/u)
-    .map((segment, index, arr) => {
+    .map((segment) => {
       if (segment === "*") return ".*"
       if (segment === "?") return "."
       // 转义正则特殊字符

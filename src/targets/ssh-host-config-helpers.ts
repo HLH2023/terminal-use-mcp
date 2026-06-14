@@ -15,7 +15,7 @@ export function expandTildePath(value: string): string {
   return value
 }
 
-/** 兼容 V2-2 预检模块旧命名：语义等同 expandTildePath。 */
+/** 预检模块旧命名兼容：语义等同 expandTildePath。 */
 export function expandUserPath(value: string): string {
   return expandTildePath(value)
 }

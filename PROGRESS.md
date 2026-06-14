@@ -7,6 +7,48 @@
 
 ---
 
+## Windows 兼容性安全修复记录（2026-06-14） ✅
+
+### 本会话新增/修改文件
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| `src/terminal/command-safety.ts` | ✅ 更新 | 默认 denylist 增加 Windows 高危命令；base command 提取支持 Windows backslash 路径；CWD 相对路径解析改用 `path.resolve`；Windows denied CWD roots 与 `ComSpec` 空值 fallback 补齐 |
+| `src/providers/tmux-provider.ts` | ✅ 更新 | `tmux -V` 改为解析版本号，无法解析或低于 3.2 时 fail-closed 为不可用 |
+| `tests/unit/command-safety.test.ts` | ✅ 更新 | 新增 Windows path basename、Windows denylist、win32 `maybeWrapWithShell`/`ComSpec` fallback 覆盖 |
+| `tests/unit/native-pty-provider.test.ts` | ✅ 更新 | 新增 win32 下 `kill()` 不传 POSIX signal 的分支覆盖 |
+| `PROGRESS.md` | ✅ 更新 | 记录本次修复范围、验证结果与完成标准 |
+
+### 验证结果
+
+| 命令/检查 | 结果 |
+|-----------|------|
+| 基线 `npx tsc --noEmit`（修改前） | ✅ 零错误 |
+| `npx tsc --noEmit` | ✅ 零错误 |
+| `npm test` | ✅ 29 files passed / 579 tests passed |
+
+### 完成标准对照
+
+| 标准 | 状态 |
+|------|------|
+| Windows 高危命令进入默认 denylist | ✅ |
+| `extractBaseCommandArgv()` 可提取 Windows backslash path basename | ✅ |
+| `isCwdAllowed()` 使用 `path.isAbsolute` / `path.resolve`，并区分 Windows denied roots | ✅ |
+| `maybeWrapWithShell()` 对空白 `ComSpec` 回退到 `cmd.exe` | ✅ |
+| `TmuxProvider.isAvailable()` 强制 tmux 3.2+ | ✅ |
+| Windows 相关单元测试已补充并通过 | ✅ |
+| 不新增依赖、不使用 `any` / `@ts-ignore` / `@ts-expect-error` | ✅ |
+| 不修改 HomeLab 主业务 (`apps/*` / `packages/*`) | ✅ |
+
+### 技术笔记
+
+- `node:path.basename` 在不同宿主平台上按本机规则处理分隔符；本次路径 basename 提取同时经过 `path.win32.basename`，确保 Windows argv 路径在 Linux/macOS CI 中也能被测试覆盖。
+- 本次 CWD denied root 边界仍以 realpath canonical path 为事实源；Windows 下默认拒绝 `C:\`、`C:\Windows`、`C:\Program Files`、`C:\Program Files (x86)` 与 `C:\ProgramData`，allowed roots 仍优先放行。
+- `tmux -V` 输出无法解析时按不可用处理，避免 tmux 兼容实现或异常输出绕过 3.2+ 要求。
+- 本次仅修改 `tools/local/terminal-use-mcp/`，未触碰 HomeLab 主业务、冻结规划或主任务板。
+
+---
+
 ## node-pty 可选动态依赖改造记录（2026-06-14） ✅
 
 ### 本会话新增/修改文件
@@ -958,7 +1000,7 @@ bash tools/local/terminal-use-mcp/.config/setup-e2e-ssh.sh
 | tests/fixtures/secret-output.js | ✅ 假 secret 输出 |
 | tests/fixtures/fullscreen-tui.js | ✅ 清屏 + 边框 |
 
-### Phase 2 Terminal 层 ✅
+### Terminal 层 ✅
 
 | 文件 | 内容 |
 |------|------|

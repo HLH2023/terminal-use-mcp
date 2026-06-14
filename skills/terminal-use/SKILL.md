@@ -458,6 +458,8 @@ Add the following to your MCP configuration (e.g., `mcp.json` or equivalent):
 
 ### Environment Variables
 
+#### Core Configuration
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `TERMINAL_USE_PROVIDERS` | All providers | Enabled provider whitelist (comma-separated) |
@@ -465,11 +467,49 @@ Add the following to your MCP configuration (e.g., `mcp.json` or equivalent):
 | `TERMINAL_USE_TMUX_PATH` | `tmux` | Absolute or relative path to tmux binary (when not on PATH) |
 | `TERMINAL_USE_WORKSPACE_ROOT` | `process.cwd()` | Root directory for CWD validation |
 | `TERMINAL_USE_ALLOWED_CWD` | _(empty)_ | Comma-separated additional allowed directories |
-| `TERMINAL_USE_SESSION_TTL_MS` | `3600000` (1 hour) | Session auto-cleanup timeout |
-| `TERMINAL_USE_CLEANUP_INTERVAL_MS` | `60000` (1 min) | How often to check for expired sessions |
 | `TERMINAL_USE_ALLOW_COMMANDS` | _(empty)_ | Comma-separated commands to allow despite denylist |
 | `TERMINAL_USE_DENY_COMMANDS` | _(empty)_ | Additional commands to deny |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | `deny` | How to handle risky commands: `deny`, `ask`, `allow` |
+
+#### Session & Behavior
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TERMINAL_USE_SESSION_TTL_MS` | `3600000` (1 hour) | Session auto-cleanup timeout |
+| `TERMINAL_USE_CLEANUP_INTERVAL_MS` | `60000` (1 min) | How often to check for expired sessions |
+| `TERMINAL_USE_DEFAULT_COLS` | `120` | Default terminal columns for new sessions |
+| `TERMINAL_USE_DEFAULT_ROWS` | `30` | Default terminal rows for new sessions |
+| `TERMINAL_USE_LARGE_PASTE_LIMIT` | `2000` | Paste size threshold requiring confirmation (characters) |
+| `TERMINAL_USE_HARD_PASTE_LIMIT` | `10000` | Hard paste size limit — pastes above this are always refused (characters) |
+| `TERMINAL_USE_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `TERMINAL_USE_HOSTS_CONFIG` | `~/.config/terminal-use-mcp/hosts.json` | Path to SSH host profiles configuration file |
+| `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set — denied)_ | Set to `1` to allow inline SSH host specification in tool calls |
+
+#### Path Overrides
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `TERMINAL_USE_ARTIFACT_DIR` | `<package-dir>/artifacts` | Override artifact/transcript output directory |
+| `TERMINAL_USE_CONFIG_DIR` | See XDG/platform defaults | Override XDG config directory |
+| `TERMINAL_USE_CONFIG_FILE` | `<config-dir>/config.json` | Override config.json file path |
+| `TERMINAL_USE_DATA_DIR` | See XDG/platform defaults | Override XDG data directory (artifact, session data) |
+
+#### XDG / Platform Paths
+
+| Variable | Purpose | Platform |
+|----------|---------|----------|
+| `XDG_CONFIG_HOME` | XDG config home — app appends `terminal-use-mcp/` | Linux, macOS |
+| `XDG_DATA_HOME` | XDG data home — app appends `terminal-use-mcp/` | Linux, macOS |
+| `XDG_RUNTIME_DIR` | XDG runtime directory (used for SSH agent socket discovery) | Linux |
+| `APPDATA` | Windows roaming app data — app appends `terminal-use-mcp/` | Windows |
+| `LOCALAPPDATA` | Windows local app data — app appends `terminal-use-mcp/` | Windows |
+
+#### SSH Authentication
+
+| Variable | Purpose |
+|----------|---------|
+| `SSH_AUTH_SOCK` | SSH agent socket path (auto-discovered if unset; see ssh-auth.ts discovery chain) |
+| `SSH_PROXY_JUMP` | SSH ProxyJump configuration (passed to SSH connection) |
 
 ### stdio Transport
 
@@ -966,6 +1006,8 @@ This is intended for development and testing only. Production use should always 
 |----------|---------|---------|
 | `TERMINAL_USE_HOSTS_CONFIG` | `~/.config/terminal-use-mcp/hosts.json` | Path to SSH host profiles configuration file |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set)_ | Set to `1` to allow inline SSH host specification in tool calls |
+| `SSH_AUTH_SOCK` | _(auto-discovered)_ | SSH agent socket path (discovered via: `auth.socket` → env var → `XDG_RUNTIME_DIR/ssh-agent.socket` → `XDG_RUNTIME_DIR/keyring/ssh` → runtime scan) |
+| `SSH_PROXY_JUMP` | _(not set)_ | SSH ProxyJump configuration (passed to SSH connection) |
 
 ### Full MCP Config with Remote Support
 

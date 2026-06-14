@@ -258,6 +258,24 @@ describe("NativePtyProvider", () => {
     await expect(provider.snapshot(sessionId)).rejects.toThrow(SessionNotFoundError)
   })
 
+  it("kill() 在 win32 下调用 pty.kill 时不传 signal", async () => {
+    const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+
+    try {
+      const provider = new NativePtyProvider(logger)
+      const sessionId = await startSession(provider)
+
+      await provider.kill(sessionId)
+
+      expect(mockPtyInstance.kill).toHaveBeenCalledWith()
+    } finally {
+      if (originalPlatformDescriptor !== undefined) {
+        Object.defineProperty(process, "platform", originalPlatformDescriptor)
+      }
+    }
+  })
+
   it("kill() 不存在的 session 抛 SESSION_NOT_FOUND", async () => {
     const provider = new NativePtyProvider(logger)
     await expect(provider.kill("nonexistent-session")).rejects.toThrow(SessionNotFoundError)
