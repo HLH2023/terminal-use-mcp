@@ -1,5 +1,7 @@
 # terminal-use-mcp
 
+[English](README.md) | [中文](README_zh.md)
+
 本地 + 远程终端交互控制 MCP 服务器。让 AI 代理像人类一样控制交互式 TUI 程序。
 
 [![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
@@ -348,5 +350,3 @@ SSH 目标定义在 `~/.config/terminal-use-mcp/hosts.json`。禁止密码登录
 ## 许可证
 
 MIT
-
-[English](README.md) | 中文

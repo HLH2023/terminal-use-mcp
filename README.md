@@ -1,5 +1,7 @@
 # terminal-use-mcp
 
+[English](README.md) | [中文](README_zh.md)
+
 Local + remote terminal interaction control MCP Server. Lets AI agents control interactive TUI programs the way a human would.
 
 [![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D18-green.svg)](https://nodejs.org/)
@@ -385,5 +387,3 @@ All permissively licensed (MIT). No GPL/LGPL dependencies.
 ## License
 
 MIT
-
-[English](README.md) | [中文](README_zh.md)
