@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "terminal-use": {
+      "type": "local",
+      "command": ["npx", "tsx", "src/index.ts"],
+      "cwd": ".",
+      "enabled": true,
+      "environment": {
+        "TERMINAL_USE_WORKSPACE_ROOT": "/home/hlh/dev/terminal-use-mcp",
+        "TERMINAL_USE_ALLOWED_CWD": "/home/hlh/dev/terminal-use-mcp,/tmp",
+        "TERMINAL_USE_LOG_LEVEL": "info"
+      },
+      "timeout": 30000
+    }
+  }
+}

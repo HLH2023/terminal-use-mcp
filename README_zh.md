@@ -655,6 +655,57 @@ terminal-use-mcp 提供两类 skill：
 | node-pty（可选） | MIT |
 | re2（可选） | BSD-3-Clause |
 
+## 参与贡献
+
+欢迎贡献！以下是快速开始指南：
+
+### 分支策略
+
+| 分支 | 用途 | 推送权限 |
+|------|------|----------|
+| `main` | 仅稳定发布 | 需要 PR（强制） |
+| `dev` | 日常开发 | 外部贡献者需 PR；维护者可直接推送 |
+
+### 开发流程
+
+1. **Fork** 本仓库
+2. 从 `dev` **创建功能分支**: `git checkout -b feature/your-feature dev`
+3. **修改代码**并确保所有测试通过:
+   ```bash
+   npm run typecheck   # tsc --noEmit — 零错误
+   npm test            # 全部测试必须通过
+   npm run build       # 必须成功
+   ```
+4. **提交**使用 [Conventional Commits](https://www.conventionalcommits.org/):
+   ```
+   feat: 添加新 provider
+   fix: 修正滚动行为
+   docs: 更新 SSH 指南
+   ```
+5. **推送**分支并向 `dev` **发起 Pull Request**
+6. **处理审查反馈**，等待批准后合并
+
+### 报告问题
+
+- **Bug 报告**: [提交 Issue](https://github.com/HLH2023/terminal-use-mcp/issues/new?template=bug_report.md)，附上复现步骤、期望与实际行为、环境信息
+- **功能请求**: [提交 Issue](https://github.com/HLH2023/terminal-use-mcp/issues/new?template=feature_request.md)，附上使用场景和提议的 API
+- **安全漏洞**: 请私下报告 — 详见 [SECURITY.md](SECURITY.md)
+
+### 代码风格
+
+- TypeScript 严格模式 — 禁止 `any`，禁止 `@ts-ignore`
+- ESM（`"type": "module"`）
+- 所有公共 API 必须有 JSDoc 注释
+- 新功能需要测试覆盖（vitest）
+
+### 添加 Skill
+
+Skill 是 `skills/` 目录下的 Markdown 文件，包含 YAML frontmatter（`name` + `description`）。添加新 Skill 的步骤：
+
+1. 创建 `skills/<skill-name>/SKILL.md`，包含 frontmatter
+2. 使用 `npx skills add HLH2023/terminal-use-mcp -s <skill-name> --dry-run` 本地测试
+3. 向 `dev` 分支提交 PR
+
 ## 许可证
 
 MIT

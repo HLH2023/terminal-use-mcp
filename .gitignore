@@ -9,3 +9,6 @@ artifacts/
 DEV-PLAN.md
 PROGRESS.md
 RESUME-CONTEXT.md
+
+# Temp files (relay docs, etc.)
+tmp/

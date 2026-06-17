@@ -682,6 +682,57 @@ All permissively licensed (MIT). No GPL/LGPL dependencies.
 | node-pty (optional) | MIT |
 | re2 (optional) | BSD-3-Clause |
 
+## Contributing
+
+Contributions are welcome! Here's how to get started:
+
+### Branch Strategy
+
+| Branch | Purpose | Push Access |
+|--------|---------|-------------|
+| `main` | Stable releases only | PR required (enforced) |
+| `dev` | Active development | PR required for external contributors; maintainers can push directly |
+
+### Development Workflow
+
+1. **Fork** the repository
+2. **Create a feature branch** from `dev`: `git checkout -b feature/your-feature dev`
+3. **Make changes** and ensure all tests pass:
+   ```bash
+   npm run typecheck   # tsc --noEmit — zero errors
+   npm test            # All tests must pass
+   npm run build       # Must succeed
+   ```
+4. **Commit** with [Conventional Commits](https://www.conventionalcommits.org/):
+   ```
+   feat: add new provider
+   fix: correct scroll behavior
+   docs: update SSH guide
+   ```
+5. **Push** your branch and **open a Pull Request** against `dev`
+6. **Address review feedback** and wait for approval
+
+### Reporting Issues
+
+- **Bug reports**: [Open an issue](https://github.com/HLH2023/terminal-use-mcp/issues/new?template=bug_report.md) with reproduction steps, expected vs actual behavior, and environment info
+- **Feature requests**: [Open an issue](https://github.com/HLH2023/terminal-use-mcp/issues/new?template=feature_request.md) with use case and proposed API
+- **Security vulnerabilities**: Please report privately — see [SECURITY.md](SECURITY.md) for details
+
+### Code Style
+
+- TypeScript strict mode — no `any`, no `@ts-ignore`
+- ESM (`"type": "module"`)
+- All public APIs must have JSDoc comments
+- Test coverage for new features (vitest)
+
+### Adding Skills
+
+Skills are Markdown files in `skills/` with YAML frontmatter (`name` + `description`). To add a new skill:
+
+1. Create `skills/<skill-name>/SKILL.md` with frontmatter
+2. Test with `npx skills add HLH2023/terminal-use-mcp -s <skill-name> --dry-run` (local)
+3. Submit a PR against `dev`
+
 ## License
 
 MIT
