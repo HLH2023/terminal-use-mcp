@@ -2,7 +2,15 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-Local + remote terminal interaction control MCP Server. Lets AI agents control interactive TUI programs the way a human would.
+MCP-native terminal computer-use for long-lived PTY/TUI sessions.
+
+terminal-use-mcp lets AI agents start, observe, type into, press keys in, wait on, and control interactive terminal programs through a snapshot-driven loop:
+
+snapshot → analyze → type/press/mouse → wait → snapshot
+
+It is designed for programs that cannot be handled well by one-shot shell commands: vim, lazygit, htop, REPLs, debuggers, installers, remote SSH TUI sessions, and external agent TUIs.
+
+This is not a shell runner. Use a normal shell tool for simple command execution.
 
 [![npm version](https://img.shields.io/npm/v/terminal-use-mcp.svg)](https://www.npmjs.com/package/terminal-use-mcp) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org/)
 
@@ -15,7 +23,26 @@ Local + remote terminal interaction control MCP Server. Lets AI agents control i
 
 > **Windows users**: The `native-pty` provider works on Windows (shell auto-detection: `ComSpec` → `cmd.exe`). The `tmux` provider requires a Unix PTY multiplexer — install [psmux](https://github.com/psmux/psmux) (tmux-compatible, 83 commands, uses `tmux` as alias) or use WSL2. If `tmux` is not on PATH, set `TERMINAL_USE_TMUX_PATH` to its absolute or relative path.
 
-This is not a shell runner. Use your bash tool for simple commands. This server handles TUI programs that require keyboard interaction: lazygit, vim, htop, Python REPL, debuggers, installers, external agent TUIs (Claude Code, Codex CLI, OpenCode).
+## Development & Security Notice
+
+terminal-use-mcp is primarily designed for local development, agent terminal-use workflows, and controlled remote development environments.
+
+It is not a sandbox.
+It is not a production bastion host.
+It is not a full remote operations security boundary.
+Do not expose it directly to untrusted users or production infrastructure.
+
+The project includes basic safety controls:
+- Command denylist
+- CWD policy
+- Secret redaction
+- Confirmation detection
+- Strict SSH host key verification
+- No password SSH auth
+- Inline SSH disabled by default
+- Audit log
+
+But these do not replace: RBAC, credential vault, multi-user isolation, network policy, approval workflow, full audit system, sandbox/container isolation, or a production bastion host.
 
 ## Concept
 
@@ -454,6 +481,10 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_ALLOW_COMMANDS` | Commands allowed even if on deny list (CSV, overrides deny) | _(empty)_ |
 | `TERMINAL_USE_DENY_COMMANDS` | Extra denied commands beyond built-in list (CSV) | _(empty)_ |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | How to handle denied commands: `deny`, `ask`, or `allow` | `deny` |
+| `TERMINAL_USE_CAPABILITY_PRESET` | Provider preset: `local`, `remote`, `persistent`, `remote-persistent`, `full`, `custom` | `local` |
+| `TERMINAL_USE_TOOL_PROFILE` | Tool profile: `minimal`, `local-tui`, `remote-tui`, `persistent-tui`, `full`, `auto` | `auto` |
+| `TERMINAL_USE_EXTRA_TOOLS` | Add tools beyond profile (CSV) | _(empty)_ |
+| `TERMINAL_USE_DISABLED_TOOLS` | Remove tools from profile (CSV) | _(empty)_ |
 
 #### Session & Behavior
 
@@ -469,6 +500,9 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_HOSTS_CONFIG` | Path to SSH host profiles configuration file | XDG config dir / hosts.json (profiles/*.json takes priority) |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | Set to `1` to allow inline SSH host specification in tool calls | _(not set — denied)_ |
 | `TERMINAL_USE_STORE_RAW_TRANSCRIPT` | Set to `1` to also save raw (unredacted) transcript files | _(not set — only redacted)_ |
+| `TERMINAL_USE_SECRET_ENV_POLICY` | Secret env var handling: `deny`, `warn`, `allow` | `deny` |
+| `TERMINAL_USE_SESSION_ID_MATCH` | Session ID matching: `strict`, `lenient` | `lenient` |
+| `TERMINAL_USE_AUDIT_LOG` | Enable audit log to `<artifactDir>/audit.ndjson` | `1` |
 
 #### Path Overrides
 
@@ -492,10 +526,11 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 
 #### SSH Authentication
 
-| Variable | Purpose |
-|----------|---------|
-| `SSH_AUTH_SOCK` | SSH agent socket path (discovered automatically if not set; see ssh-auth.ts discovery chain) |
-| `SSH_PROXY_JUMP` | SSH ProxyJump configuration (passed to SSH connection) |
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SSH_AUTH_SOCK` | SSH agent socket path (discovered automatically if not set; see ssh-auth.ts discovery chain) | _(auto-discovered)_ |
+| `SSH_PROXY_JUMP` | SSH ProxyJump configuration (passed to SSH connection) | _(not set)_ |
+| `TERMINAL_USE_SSH_AGENT_DISCOVERY` | SSH agent socket discovery mode: `env-only`, `xdg`, `scan` | `xdg` |
 
 ## MCP Tools
 
@@ -569,6 +604,10 @@ terminal-use-mcp is not a sandbox. Security policies restrict the entry point, n
 - **Provider whitelist**: `TERMINAL_USE_PROVIDERS` controls which providers are enabled (unset = all)
 - **observationTrust**: All snapshots return `observationTrust: "untrusted"` — terminal output is untrusted observation, not instruction
 - **ReDoS protection**: User-supplied regex is validated against catastrophic backtracking. When the `re2` optional dependency is installed, all regex execution uses the RE2 engine (guaranteed linear time). Without `re2`, a heuristic nested-quantifier detector blocks known dangerous patterns.
+- **Capability presets**: `TERMINAL_USE_CAPABILITY_PRESET` simplifies provider configuration with named presets (local, remote, persistent, etc.) instead of manual provider lists
+- **Tool profiles**: `TERMINAL_USE_TOOL_PROFILE` controls which MCP tools are registered, from `minimal` (6 tools) to `full` (29 tools). Default: `auto` (selected from capability preset)
+- **Secret env policy**: Detects suspected secret environment variables (TOKEN, SECRET, PASSWORD, etc.) in `input.env` and `profile.env`. Default: `deny` (reject). Configurable via `TERMINAL_USE_SECRET_ENV_POLICY`
+- **Audit log**: All tool invocations recorded to `<artifactDir>/audit.ndjson` with allow/deny/error decisions and redacted input summaries. Enabled by default. Audit write failure does not affect main flow
 
 See [docs/security.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/security.md) for full policy details, env var overrides, and regex patterns.
 

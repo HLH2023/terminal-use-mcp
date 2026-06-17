@@ -39,8 +39,10 @@ import {
   LargePasteRefusedError,
   ProcessExitedError,
   ProviderCapabilityUnsupportedError,
+  ProxyJumpUnsupportedError,
   RemoteCwdDeniedError,
   SecretDetectedError,
+  SecretEnvDeniedError,
   SessionNotFoundError,
   SessionTimeoutError,
   SshAuthFailedError,
@@ -60,6 +62,8 @@ import {
 } from "../terminal/mouse.js"
 import type { MouseClickEvent, MouseScrollEvent } from "../terminal/mouse.js"
 import { containsSecrets, getDetectedSecretTypes } from "../terminal/redact.js"
+import { checkSecretEnvPolicy } from "../terminal/secret-env-policy.js"
+import type { SecretEnvPolicy } from "../config.js"
 import { createSnapshot } from "../terminal/terminal-snapshot.js"
 import type { Highlight, TerminalSnapshot } from "../terminal/terminal-snapshot.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
@@ -70,12 +74,14 @@ import { XtermAdapter } from "../terminal/xterm-adapter.js"
 import { safeCleanup } from "../terminal/safe-cleanup.js"
 import { computeHostFingerprint, verifyPinnedFingerprint } from "../targets/host-fingerprint.js"
 import { parseKnownHosts, type KnownHostEntry } from "../targets/known-hosts.js"
-import { createRemoteCwdPolicy, resolveRemoteCwd } from "../targets/remote-cwd-policy.js"
+import { createRemoteCwdPolicy, resolveRemoteCwd, validateCanonicalRemoteCwd } from "../targets/remote-cwd-policy.js"
 import { remoteCapabilityCache, type RemoteCapabilities, type RemoteCapabilityCache } from "../targets/remote-capability-cache.js"
 import { loadHostsConfig } from "../targets/ssh-host-config.js"
 import { resolveSshAuth } from "../targets/ssh-auth.js"
 import { resolveSshTarget, type ResolvedSshTarget } from "../targets/ssh-profile-loader.js"
-import type { SshAuthRef, SshHostProfile, SshSessionMetadata, TerminalTarget } from "../targets/target-types.js"
+import type { RemoteCwdPolicy, SshAuthRef, SshHostProfile, SshSessionMetadata, TerminalTarget } from "../targets/target-types.js"
+import type { SshAgentDiscoveryMode } from "../config.js"
+import { shellQuote } from "../terminal/shell-quote.js"
 
 const DEFAULT_TTL_MS = 60 * 60 * 1000
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000
@@ -114,6 +120,10 @@ export type SshPtyProviderOptions = {
   hostsConfigPath?: string
   /** 远端能力缓存；测试可注入独立实例，生产默认使用模块级 singleton。 */
   capabilityCache?: RemoteCapabilityCache
+  /** SSH agent socket 发现模式；默认 "xdg"。 */
+  sshAgentDiscoveryMode?: SshAgentDiscoveryMode
+  /** 秘密环境变量策略；统一从 config 层传入，默认 "deny"。 */
+  secretEnvPolicy?: SecretEnvPolicy
 }
 
 export type SshPtyAuthConnectConfig =
@@ -199,12 +209,16 @@ export class SshPtyProvider implements TerminalProvider {
   private readonly logger: Logger
   private readonly options: SshPtyProviderOptions
   private readonly capabilityCache: RemoteCapabilityCache
+  private readonly discoveryMode: SshAgentDiscoveryMode
+  private readonly secretEnvPolicy: SecretEnvPolicy
 
   constructor(logger: Logger, options?: SshPtyProviderOptions) {
     this.sessions = new Map()
     this.logger = logger
     this.options = options ?? {}
     this.capabilityCache = this.options.capabilityCache ?? remoteCapabilityCache
+    this.discoveryMode = this.options.sshAgentDiscoveryMode ?? "xdg"
+    this.secretEnvPolicy = this.options.secretEnvPolicy ?? "deny"
   }
 
   /** ssh2 是 package dependency，安装后即可用；无 native addon 动态失败路径。 */
@@ -214,8 +228,30 @@ export class SshPtyProvider implements TerminalProvider {
 
   async start(input: StartInput): Promise<TerminalSession> {
     const resolvedTarget = await this.resolveStartTarget(input.target ?? { kind: "local" })
+
+    // ProxyJump fail-closed: ssh-pty (ssh2.Client) 不支持 ProxyJump。
+    // 带 proxyJump 的 profile 必须通过 ssh-tmux（系统 SSH）连接。
+    if (resolvedTarget.proxyJump) {
+      throw new ProxyJumpUnsupportedError("ssh-pty")
+    }
+
     const cwd = resolveRemoteCwd(createRemoteCwdPolicy(resolvedTarget), input.cwd)
-    const auth = await resolveSshPtyAuthConnectConfig(resolvedTarget.auth)
+    const auth = await resolveSshPtyAuthConnectConfig(resolvedTarget.auth, this.discoveryMode)
+
+    // 检查 input.env 和 profile.env 中的疑似 secret 环境变量
+    const policy = this.secretEnvPolicy
+    if (input.env !== undefined && Object.keys(input.env).length > 0) {
+      const secretCheck = checkSecretEnvPolicy(input.env, policy)
+      if (!secretCheck.allowed) {
+        throw new SecretEnvDeniedError(secretCheck.deniedKeys)
+      }
+    }
+    if (resolvedTarget.env !== undefined && Object.keys(resolvedTarget.env).length > 0) {
+      const secretCheck = checkSecretEnvPolicy(resolvedTarget.env, policy)
+      if (!secretCheck.allowed) {
+        throw new SecretEnvDeniedError(secretCheck.deniedKeys)
+      }
+    }
 
     const sessionId = generateSessionId()
     const providerSessionId = `sshpty_${sessionId}`
@@ -254,23 +290,27 @@ export class SshPtyProvider implements TerminalProvider {
       const caps = await this.capabilityCache.probe(client, profileName)
       this.logger.info("Remote capabilities", { profile: profileName, caps })
 
+      // Remote CWD canonical preflight：在远端执行 cd + pwd -P 获取真实路径，
+      // 防止 symlink 绕过 string-based CWD 检查。
+      const canonicalCwd = await preflightCanonicalRemoteCwd(client, cwd, createRemoteCwdPolicy(resolvedTarget))
+
       const channel = await openRemotePtyExecChannel(client, {
         command: input.command,
         args: input.args,
-        cwd,
+        cwd: canonicalCwd,
         cols: input.cols,
         rows: input.rows,
         env: { ...(resolvedTarget.env ?? {}), ...(input.env ?? {}) },
         capabilities: caps,
       })
 
-      const metadata = createSshSessionMetadata(resolvedTarget, auth.authType, cwd, input, verifiedFingerprint, createdAt)
+      const metadata = createSshSessionMetadata(resolvedTarget, auth.authType, canonicalCwd, input, verifiedFingerprint, createdAt)
       const session: SshPtySession = {
         sessionId,
         providerSessionId,
         command: input.command,
         args: input.args,
-        cwd: cwd,
+        cwd: canonicalCwd,
         status: "starting",
         exitCode: null,
         cols: input.cols,
@@ -303,7 +343,7 @@ export class SshPtyProvider implements TerminalProvider {
         port: resolvedTarget.port,
         username: resolvedTarget.username,
         command: input.command,
-        cwd: cwd,
+        cwd: canonicalCwd,
         authType: auth.authType,
       })
 
@@ -772,8 +812,11 @@ export function resolveSshPtyTarget(target: TerminalTarget, hostsConfig: Readonl
  *
  * 注意：key-file 模式必须读取私钥 Buffer 才能交给 ssh2，但不会输出、缓存或写入 artifact。
  */
-export async function resolveSshPtyAuthConnectConfig(auth: SshAuthRef): Promise<SshPtyAuthConnectConfig> {
-  const resolved = await resolveSshAuth(auth)
+export async function resolveSshPtyAuthConnectConfig(
+  auth: SshAuthRef,
+  discoveryMode: SshAgentDiscoveryMode = "xdg",
+): Promise<SshPtyAuthConnectConfig> {
+  const resolved = await resolveSshAuth(auth, discoveryMode)
   if (resolved.type === "agent") {
     return {
       authType: "agent",
@@ -846,10 +889,12 @@ export async function verifyPresentedHostKey(profile: ResolvedSshTarget | SshHos
   const entries = await parseKnownHosts(profile.knownHosts)
   const hostEntries = entries.filter((entry) => knownHostEntryMatchesTarget(entry, profile.host, profile.port))
   if (hostEntries.length === 0) {
-    throw new SshHostKeyUnknownError(profile.host, {
-      reason: "host_not_found",
-      detail: `Host ${profile.host}:${profile.port} was not found in known_hosts`,
-    })
+    // 检查是否有 hashed 条目被跳过
+    const hasHashed = entries.some((entry) => entry.hashedHost === true)
+    const detail = hasHashed
+      ? `Host ${profile.host}:${profile.port} was not found in known_hosts. Note: known_hosts contains hashed entries (|1|...) that cannot be matched by hostname. Use pinnedHostFingerprint instead.`
+      : `Host ${profile.host}:${profile.port} was not found in known_hosts`
+    throw new SshHostKeyUnknownError(profile.host, { reason: "host_not_found", detail })
   }
 
   const matchedEntry = hostEntries.find((entry) => {
@@ -871,11 +916,6 @@ export async function verifyPresentedHostKey(profile: ResolvedSshTarget | SshHos
   }
 
   return computeHostFingerprint(matchedEntry.publicKey, "sha256")
-}
-
-/** 使用 POSIX shell 单引号转义远端 exec 字符串，避免未转义拼接命令/参数。 */
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/gu, `'\\''`)}'`
 }
 
 export function buildShellExecCommand(command: string, args: string[]): string {
@@ -1008,6 +1048,8 @@ function createSshSessionMetadata(
 }
 
 function knownHostEntryMatchesTarget(entry: KnownHostEntry, host: string, port: number): boolean {
+  // hashed 条目无法通过 hostname 匹配，跳过
+  if (entry.hashedHost === true) return false
   const expected = new Set<string>([host, `${host}:${port}`, `[${host}]:${port}`])
   if (port === 22) {
     expected.add(host)
@@ -1097,5 +1139,51 @@ function stringifyUnknownError(error: unknown): string {
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
+  })
+}
+
+/**
+ * 远程 CWD canonical preflight：在远端执行 cd + pwd -P 获取真实路径，
+ * 然后用 validateCanonicalRemoteCwd 校验，防止 symlink 绕过。
+ *
+ * 失败时拒绝启动（fail-closed）。
+ */
+function preflightCanonicalRemoteCwd(
+  client: Client,
+  cwd: string,
+  policy: RemoteCwdPolicy,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const safeCwd = shellQuote(cwd)
+    const command = `cd ${safeCwd} && pwd -P`
+
+    client.exec(command, (err, stream) => {
+      if (err) {
+        reject(new RemoteCwdDeniedError(cwd, `Canonical preflight failed: ${err.message}`))
+        return
+      }
+
+      let output = ""
+      stream.on("data", (data: Buffer) => { output += data.toString() })
+
+      // ssh2 exec channel 'close' fires with exit code; use for completion signal.
+      stream.on("close", (exitCode: number | null) => {
+        if (exitCode !== 0) {
+          reject(new RemoteCwdDeniedError(cwd, `Canonical preflight failed (exit ${exitCode}): ${output.trim()}`))
+          return
+        }
+        const canonicalPath = output.trim()
+        if (!canonicalPath.startsWith("/")) {
+          reject(new RemoteCwdDeniedError(cwd, `Canonical preflight returned invalid path: "${canonicalPath}"`))
+          return
+        }
+        try {
+          const validated = validateCanonicalRemoteCwd(policy, canonicalPath)
+          resolve(validated)
+        } catch (rejectionError) {
+          reject(rejectionError)
+        }
+      })
+    })
   })
 }

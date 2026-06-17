@@ -140,6 +140,7 @@ describe("SshTmuxProvider with pinnedHostFingerprint", () => {
       sshAvailabilityChecker: async () => true,
       capabilityCache: new RemoteCapabilityCache([["devbox", DEFAULT_REMOTE_CAPS]]),
       keyscanVerifier,
+      rawCommandExecutor: async () => ok("/home/tester/project"),
     })
 
     await provider.start({
@@ -173,6 +174,7 @@ describe("SshTmuxProvider with pinnedHostFingerprint", () => {
       sshAvailabilityChecker: async () => true,
       capabilityCache: new RemoteCapabilityCache([["devbox", DEFAULT_REMOTE_CAPS]]),
       keyscanVerifier,
+      rawCommandExecutor: async () => ok("/home/tester/project"),
     })
 
     await expect(provider.start({
@@ -202,6 +204,7 @@ describe("SshTmuxProvider with pinnedHostFingerprint", () => {
       sshAvailabilityChecker: async () => true,
       capabilityCache: new RemoteCapabilityCache([["devbox", DEFAULT_REMOTE_CAPS]]),
       keyscanVerifier,
+      rawCommandExecutor: async () => ok("/home/tester/project"),
     })
 
     const session = await provider.start({
@@ -234,6 +237,7 @@ describe("SshTmuxProvider with pinnedHostFingerprint", () => {
       sshAvailabilityChecker: async () => true,
       capabilityCache: new RemoteCapabilityCache([["devbox", DEFAULT_REMOTE_CAPS]]),
       keyscanVerifier,
+      rawCommandExecutor: async () => ok("/home/tester/project"),
     })
 
     await provider.start({
@@ -266,6 +270,7 @@ describe("SshTmuxProvider with pinnedHostFingerprint", () => {
       sshAvailabilityChecker: async () => true,
       capabilityCache: new RemoteCapabilityCache([["devbox", DEFAULT_REMOTE_CAPS]]),
       keyscanVerifier,
+      rawCommandExecutor: async () => ok("/home/tester/project"),
     })
 
     await provider.start({

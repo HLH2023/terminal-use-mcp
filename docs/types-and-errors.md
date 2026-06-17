@@ -66,6 +66,7 @@ type TerminalUseErrorCode =
   | "PROVIDER_CAPABILITY_UNSUPPORTED"
   | "SESSION_TIMEOUT"
   | "UNSAFE_COMMAND"
+  | "UNSAFE_REGEX"
   | "LARGE_PASTE_REFUSED"
   | "SECRET_DETECTED"
   | "CONFIRMATION_REQUIRED"
@@ -87,6 +88,10 @@ type TerminalUseErrorCode =
   | "REMOTE_CWD_DENIED"
   | "REMOTE_TMUX_NOT_AVAILABLE"
   | "REMOTE_COMMAND_DENIED"
+  // v0.2.0 error codes
+  | "PROXY_JUMP_UNSUPPORTED"    // ssh-pty does not support ProxyJump; use ssh-tmux or remove proxyJump
+  | "SECRET_ENV_DENIED"         // Environment variables suspected to contain secrets; set SECRET_ENV_POLICY=warn or allow
+  | "SESSION_AMBIGUOUS"         // Session ID matches multiple sessions; use exact ID
 ```
 
 ## TerminalTarget

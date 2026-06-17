@@ -19,6 +19,8 @@ export type KnownHostEntry = {
   publicKey: string
   /** 原始行号，用于错误定位 */
   sourceLine?: number
+  /** 是否使用 hashed host 格式（|1|salt|hash）；无法通过 hostname 直接匹配 */
+  hashedHost?: boolean
 }
 
 /** 已知主机校验结果 */
@@ -74,8 +76,18 @@ export async function verifyHostKey(host: string, port: number, knownHostsPath: 
   }
 
   const expectedHosts = buildExpectedHostPatterns(host, port)
-  const matched = entries.find((entry) => expectedHosts.has(entry.host))
+  const matched = entries.find((entry) => !entry.hashedHost && expectedHosts.has(entry.host))
   if (matched === undefined) {
+    // 检查是否存在 hashed 条目 —— 这些条目无法通过 hostname 匹配，
+    // 需要提示用户使用 pinnedHostFingerprint。
+    const hasHashedEntries = entries.some((entry) => entry.hashedHost === true)
+    if (hasHashedEntries) {
+      return {
+        ok: false,
+        reason: "host_not_found",
+        detail: `Host ${formatHostPort(host, port)} was not found in ${expandedPath}.\nNote: known_hosts contains hashed entries (|1|...) that cannot be matched by hostname. Use pinnedHostFingerprint in the SSH profile instead.`,
+      }
+    }
     return {
       ok: false,
       reason: "host_not_found",
@@ -120,6 +132,8 @@ function parseKnownHostLine(line: string, sourceLine: number): KnownHostEntry[] 
     return []
   }
 
+  const hashed = isHashedHostPattern(hostField)
+
   return hostField
     .split(",")
     .map((hostPattern): KnownHostEntry | undefined => {
@@ -127,9 +141,14 @@ function parseKnownHostLine(line: string, sourceLine: number): KnownHostEntry[] 
       if (normalizedHost.length === 0) {
         return undefined
       }
-      return { host: normalizedHost, keyType, publicKey, sourceLine }
+      return { host: normalizedHost, keyType, publicKey, sourceLine, hashedHost: hashed }
     })
     .filter((entry): entry is KnownHostEntry => entry !== undefined)
+}
+
+/** 检测 known_hosts 条目是否使用 hashed host 格式 (|1|salt|hash)。 */
+function isHashedHostPattern(hostField: string): boolean {
+  return hostField.startsWith("|1|")
 }
 
 function normalizeKnownHostPattern(hostPattern: string): string {

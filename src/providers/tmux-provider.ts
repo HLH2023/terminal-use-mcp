@@ -28,12 +28,15 @@ import { TerminalUseError } from "../terminal/errors.js"
 import type { ScreenState } from "../terminal/wait.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
 import { generateSessionId } from "../terminal/ids.js"
+import { checkSecretEnvPolicy } from "../terminal/secret-env-policy.js"
+import type { SecretEnvPolicy } from "../config.js"
 import { mouseClickToTmuxSequence, mouseScrollToTmuxSequence, validateMouseCoords } from "../terminal/mouse.js"
 import { XtermAdapter } from "../terminal/xterm-adapter.js"
 import { safeCleanup } from "../terminal/safe-cleanup.js"
 import {
   DependencyMissingError,
   ProcessExitedError,
+  SecretEnvDeniedError,
   SessionNotFoundError,
   SessionTimeoutError,
 } from "../terminal/errors.js"
@@ -91,6 +94,11 @@ type TmuxListEntry = {
   rows: number
 }
 
+export type TmuxProviderOptions = {
+  /** 秘密环境变量策略；统一从 config 层传入，默认 "deny"。 */
+  secretEnvPolicy?: SecretEnvPolicy
+}
+
 export class TmuxProvider implements TerminalProvider {
   readonly name: ProviderName = "tmux"
   readonly capabilities: ProviderCapabilities = TMUX_CAPABILITIES
@@ -98,11 +106,13 @@ export class TmuxProvider implements TerminalProvider {
   private sessions: Map<string, TmuxSession>
   private logger: Logger
   private tmuxAvailable: boolean | undefined
+  private readonly secretEnvPolicy: SecretEnvPolicy
 
-  constructor(logger: Logger) {
+  constructor(logger: Logger, options?: TmuxProviderOptions) {
     this.sessions = new Map()
     this.logger = logger
     this.tmuxAvailable = undefined
+    this.secretEnvPolicy = options?.secretEnvPolicy ?? "deny"
   }
 
   async isAvailable(): Promise<boolean> {
@@ -121,6 +131,14 @@ export class TmuxProvider implements TerminalProvider {
 
   async start(input: StartInput): Promise<TerminalSession> {
     await this.ensureTmuxAvailable()
+
+    // 检查 input.env 中的疑似 secret 环境变量
+    if (input.env !== undefined && Object.keys(input.env).length > 0) {
+      const secretCheck = checkSecretEnvPolicy(input.env, this.secretEnvPolicy)
+      if (!secretCheck.allowed) {
+        throw new SecretEnvDeniedError(secretCheck.deniedKeys)
+      }
+    }
 
     const sessionId = generateSessionId()
     const tmuxId = this.createTmuxSessionName()

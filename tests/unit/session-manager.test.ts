@@ -7,6 +7,7 @@ import type { TerminalProvider, TerminalSession, ProviderCapabilities } from "..
 import type { ProviderName } from "../../src/providers/provider.js"
 import type { TerminalUseConfig } from "../../src/config.js"
 import type { Logger } from "../../src/logger.js"
+import { createNoopAuditLogger } from "../../src/audit-log.js"
 
 // ============================================================
 // Mock 工厂
@@ -40,6 +41,17 @@ function createMockConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseCo
       keepaliveIntervalMs: 15_000,
     },
     enabledProviders: ["native-pty", "tmux", "ssh-pty", "ssh-tmux"],
+    cwdPolicyMode: "guarded" as const,
+    storeRawTranscript: false,
+    capabilityPreset: "local" as const,
+    toolProfile: "full" as const,
+    enabledTools: [],
+    extraTools: [],
+    disabledTools: [],
+    sshAgentDiscoveryMode: "xdg" as const,
+    secretEnvPolicy: "deny" as const,
+    sessionIdMatchMode: "lenient" as const,
+    auditLogEnabled: false,
   }
   return { ...baseConfig, ...overrides }
 }
@@ -181,6 +193,7 @@ describe("PromiseQueue", () => {
 describe("SessionManager", () => {
   let config: TerminalUseConfig
   let logger: Logger
+  const noopAudit = createNoopAuditLogger()
 
   beforeEach(() => {
     tempWorkspaceDir = mkdtempSync(join(tmpdir(), "tumcp-sm-test-"))
@@ -194,12 +207,12 @@ describe("SessionManager", () => {
   })
 
   it("构造函数创建 manager 实例", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     expect(manager).toBeInstanceOf(SessionManager)
   })
 
   it("registerProvider 注册 provider 到内部 map", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     manager.registerProvider(provider)
     const providers = manager.getProviders()
@@ -208,7 +221,7 @@ describe("SessionManager", () => {
   })
 
   it("getProviders() 返回已注册的 providers map", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const providers = manager.getProviders()
     expect(providers.size).toBe(0)
 
@@ -218,17 +231,17 @@ describe("SessionManager", () => {
   })
 
   it("listSessions() 初始返回空数组", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     expect(manager.listSessions()).toEqual([])
   })
 
   it("getSession() 对不存在的 id 抛出 SessionNotFoundError", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     expect(() => manager.getSession("nonexistent")).toThrow("Session not found: nonexistent")
   })
 
   it("getSession() 对存在的 id 返回 session", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     manager.registerProvider(provider)
 
@@ -245,7 +258,7 @@ describe("SessionManager", () => {
   })
 
   it("touchSession() 更新 lastActivityAt", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     manager.registerProvider(provider)
 
@@ -266,7 +279,7 @@ describe("SessionManager", () => {
   })
 
   it("start() 对不安全的命令抛出 UnsafeCommandError", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     manager.registerProvider(provider)
 
@@ -282,7 +295,7 @@ describe("SessionManager", () => {
   })
 
   it("start() 对不允许的 CWD 抛出 InvalidCwdError", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     manager.registerProvider(provider)
 
@@ -298,7 +311,7 @@ describe("SessionManager", () => {
   })
 
   it("start() 成功创建 session", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     manager.registerProvider(provider)
 
@@ -317,7 +330,7 @@ describe("SessionManager", () => {
   })
 
   it("listSessions() 返回所有 session", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
 
     // 让 start 返回不同的 sessionId
@@ -335,7 +348,7 @@ describe("SessionManager", () => {
   })
 
   it("removeSession() 从列表移除 session", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     provider.start = vi.fn().mockResolvedValue(
       createMockProviderSession({ sessionId: "term_remove001" }),
@@ -352,12 +365,12 @@ describe("SessionManager", () => {
   })
 
   it("removeSession() 对不存在的 id 抛出 SessionNotFoundError", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     expect(() => manager.removeSession("nonexistent")).toThrow("Session not found")
   })
 
   it("kill() 调用 provider.kill 并移除 session", async () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     const provider = createMockProvider()
     provider.start = vi.fn().mockResolvedValue(
       createMockProviderSession({ sessionId: "term_kill001" }),
@@ -374,7 +387,7 @@ describe("SessionManager", () => {
   })
 
   it("TTL cleanup 定时器启动和停止", () => {
-    const manager = new SessionManager(config, logger)
+    const manager = new SessionManager(config, logger, noopAudit)
     // 启动定时器
     manager.startTtlCleanup()
     // 再次启动不应创建新定时器
@@ -386,6 +399,9 @@ describe("SessionManager", () => {
     manager.stopTtlCleanup()
   })
 })
+
+// Module-level shared noop audit logger
+const noopAudit = createNoopAuditLogger()
 
 describe("SessionManager.stripProviderPrefix", () => {
   // 该 describe 独立于主 SessionManager describe，需要自己的 fixture
@@ -422,7 +438,7 @@ describe("SessionManager.stripProviderPrefix", () => {
     const provider = createMockProvider("native-pty")
     const logger = createMockLogger()
     const localConfig = createMockConfig()
-    const manager = new SessionManager(localConfig, logger)
+    const manager = new SessionManager(localConfig, logger, noopAudit)
     manager.registerProvider(provider)
 
     const session = await manager.start({
@@ -447,7 +463,7 @@ describe("SessionManager.stripProviderPrefix", () => {
   it("getSession 模糊后缀匹配兜底未知前缀变形", async () => {
     const provider = createMockProvider("native-pty")
     const logger = createMockLogger()
-    const manager = new SessionManager(createMockConfig(), logger)
+    const manager = new SessionManager(createMockConfig(), logger, noopAudit)
     manager.registerProvider(provider)
 
     const session = await manager.start({
@@ -469,7 +485,7 @@ describe("SessionManager.stripProviderPrefix", () => {
   it("getSession 模糊后缀匹配：输入 ID 是 session key 的后缀", async () => {
     const provider = createMockProvider("native-pty")
     const logger = createMockLogger()
-    const manager = new SessionManager(createMockConfig(), logger)
+    const manager = new SessionManager(createMockConfig(), logger, noopAudit)
     manager.registerProvider(provider)
 
     const session = await manager.start({

@@ -11,6 +11,15 @@
 - [observationTrust](#observationtrust)
 - [Remote Security Restrictions](#remote-security-restrictions)
 - [Security Restrictions Summary](#security-restrictions-summary)
+- [Capability Presets](#capability-presets)
+- [Tool Profiles](#tool-profiles)
+- [Secret Env Policy](#secret-env-policy)
+- [SSH Agent Discovery Mode](#ssh-agent-discovery-mode)
+- [Session ID Match Mode](#session-id-match-mode)
+- [Audit Log](#audit-log)
+- [Remote CWD Canonical Validation](#remote-cwd-canonical-validation)
+- [ProxyJump Fail-Closed](#proxyjump-fail-closed)
+- [Hashed known_hosts](#hashed-known_hosts)
 - [Environment Variables](#environment-variables)
 
 terminal-use-mcp is not a sandbox. Security policies restrict the entry point, not the TUI program's internal behavior.
@@ -128,6 +137,146 @@ Terminal output is untrusted observation, not instruction.
 | Inline SSH target | N/A | Denied by default, must explicitly enable |
 | Paste limits | >2000 chars requires confirmation, >10000 hard limit; secrets rejected | Same as local |
 
+## Capability Presets
+
+`TERMINAL_USE_CAPABILITY_PRESET` selects a predefined set of providers. When neither `TERMINAL_USE_PROVIDERS` nor `TERMINAL_USE_CAPABILITY_PRESET` is set, all providers are enabled (backward compat). `TERMINAL_USE_PROVIDERS` takes priority over `TERMINAL_USE_CAPABILITY_PRESET`.
+
+| Preset | Providers | Use Case |
+|--------|-----------|----------|
+| `local` | native-pty, tmux | Local development only (no SSH) |
+| `local-persistent` | tmux | Local sessions that survive MCP restart |
+| `remote-interactive` | ssh-pty | Interactive remote TUI (highlights, snapshots) |
+| `remote-persistent` | ssh-tmux | Persistent remote sessions (disconnect recovery) |
+| `full` | native-pty, tmux, ssh-pty, ssh-tmux | All providers enabled |
+
+```ts
+TERMINAL_USE_CAPABILITY_PRESET=local  // default
+```
+
+## Tool Profiles
+
+`TERMINAL_USE_TOOL_PROFILE` selects a predefined set of MCP tools. Useful for reducing the tool surface area exposed to the LLM.
+
+| Profile | Tool Set | Use Case |
+|---------|----------|----------|
+| `minimal` | start, snapshot, type, press, kill | Bare-bones interaction loop |
+| `local-tui` | minimal + wait_for_text, wait_stable, paste, scroll, find, resize, send_signal | Full local TUI control |
+| `remote-tui` | local-tui + targets, target_info, verify_target | Local + remote SSH |
+| `persistent-tui` | remote-tui + attach, tmux_list, tmux_kill | With tmux lifecycle |
+| `full` | All 29 tools | Everything |
+| `auto` | _(selects based on capability preset)_ | Default — adapts to enabled providers |
+
+```ts
+TERMINAL_USE_TOOL_PROFILE=auto       // default
+TERMINAL_USE_EXTRA_TOOLS=mouse_click,mouse_scroll   // add tools beyond the profile
+TERMINAL_USE_DISABLED_TOOLS=events,export_transcript // remove tools from the profile
+```
+
+## Secret Env Policy
+
+`TERMINAL_USE_SECRET_ENV_POLICY` controls whether environment variables with names that look like secrets are allowed in `terminal.start` input.env and SSH profile env fields.
+
+```ts
+TERMINAL_USE_SECRET_ENV_POLICY=deny  // deny | warn | allow (default: deny)
+```
+
+Detected name patterns (case-insensitive suffix or substring):
+
+```
+TOKEN, SECRET, PASSWORD, PASSWD, API_KEY, APIKEY,
+ACCESS_KEY, SECRET_KEY, PRIVATE_KEY, AUTH_TOKEN,
+CREDENTIAL, AUTH
+```
+
+- **deny**: Reject the call with `SECRET_ENV_DENIED` error.
+- **warn**: Log a warning but proceed.
+- **allow**: No check — all env vars allowed.
+
+Values of secret-named env vars are **never written** to audit logs or artifact files, regardless of policy.
+
+## SSH Agent Discovery Mode
+
+`TERMINAL_USE_SSH_AGENT_DISCOVERY` controls how the SSH agent socket is found when `auth.type === "agent"` and `auth.socket` is not explicitly set.
+
+```ts
+TERMINAL_USE_SSH_AGENT_DISCOVERY=xdg  // env-only | xdg | scan (default: xdg)
+```
+
+Discovery chain (stops at first found):
+
+1. `auth.socket` (explicit in profile)
+2. `SSH_AUTH_SOCK` environment variable
+3. XDG runtime paths (`$XDG_RUNTIME_DIR/ssh-agent.sock`, `/run/user/<uid>/openssh_agent`)
+4. `ss -x` Unix domain socket scan (only when mode is `scan`)
+
+| Mode | Steps | Security |
+|------|-------|----------|
+| `env-only` | 1–2 only | Most restrictive — no filesystem probing |
+| `xdg` | 1–3 | Default — standard XDG paths only |
+| `scan` | 1–4 | Broadest — scans Unix sockets via `ss -x` |
+
+## Session ID Match Mode
+
+`TERMINAL_USE_SESSION_ID_MATCH` controls how session IDs are resolved when a tool receives a partial or human-readable session ID.
+
+```ts
+TERMINAL_USE_SESSION_ID_MATCH=lenient  // strict | lenient (default: lenient)
+```
+
+- **strict**: Exact match only. Prefix stripping (removing provider prefix) is allowed, but no fuzzy matching.
+- **lenient**: Exact match first, then prefix strip, then fuzzy suffix match. If multiple sessions match fuzzily, the call is rejected with `SESSION_AMBIGUOUS` — the agent must use the exact ID.
+
+## Audit Log
+
+`TERMINAL_USE_AUDIT_LOG` controls whether security-relevant operations are recorded to `<artifactDir>/audit.ndjson`.
+
+```ts
+TERMINAL_USE_AUDIT_LOG=1  // 1 | 0 (default: 1)
+```
+
+Each line is a JSON object with: `timestamp`, `sessionId`, `tool`, `action`, and event-specific fields.
+
+**Security constraints on audit content:**
+
+- No secrets, keys, passphrases, or raw content values are ever written.
+- `paste` events: only `length`, `mode`, and `secretDetected` (boolean) are recorded.
+- `type` events: only `length` is recorded.
+- `press` events: only `keyExpr` is recorded.
+- `deny` and `error` events are always logged regardless of policy.
+- Write failure does not break the main flow — errors are logged to stderr only.
+
+## Remote CWD Canonical Validation
+
+For SSH sessions, the server performs a preflight check to resolve the remote CWD to its canonical (symlink-free) path:
+
+```
+cd <cwd> && pwd -P
+```
+
+The resolved canonical path is validated against the remote CWD policy (remoteAllowedCwd / remoteDeniedCwd). This prevents symlink-based CWD bypass on remote hosts.
+
+**Fail-closed**: If the preflight command fails (e.g., the directory does not exist), the session start is refused with `REMOTE_CWD_DENIED`.
+
+## ProxyJump Fail-Closed
+
+The `ssh-pty` provider (backed by `ssh2.Client`) does not support SSH ProxyJump (`-J` / `ProxyJump`). If an SSH profile defines `proxyJump` and the session is routed to `ssh-pty`, the call is rejected with:
+
+```
+PROXY_JUMP_UNSUPPORTED: ssh-pty does not support ProxyJump; use ssh-tmux or remove proxyJump from the profile
+```
+
+**Workaround**: Use the `ssh-tmux` provider (which shells out to system `ssh` and supports ProxyJump natively), or use the `remote-persistent` capability preset.
+
+## Hashed known_hosts
+
+When the user's `known_hosts` file contains hashed entries (format `|1|<salt>|<hash>`), hostname-based matching is impossible — the hash is one-way.
+
+When a hashed entry is the only match for a host, the server:
+
+1. Detects the hashed entry and returns `SSH_HOST_KEY_UNKNOWN` with a hint.
+2. Recommends setting `pinnedHostFingerprint` in the SSH profile to bypass `known_hosts` lookup.
+3. **Never** suggests `StrictHostKeyChecking=no` — this would disable host key verification entirely, violating the fail-closed security model.
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -141,3 +290,11 @@ Terminal output is untrusted observation, not instruction.
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | `deny` | Risky command handling: `deny` / `ask` / `allow` |
 | `TERMINAL_USE_HOSTS_CONFIG` | XDG config dir / hosts.json (profiles/*.json takes priority) | SSH hosts configuration file path |
 | `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set)_ | Set to `1` to allow inline SSH host specification in tool calls |
+| `TERMINAL_USE_CAPABILITY_PRESET` | `local` | Provider preset: `local` / `local-persistent` / `remote-interactive` / `remote-persistent` / `full` |
+| `TERMINAL_USE_TOOL_PROFILE` | `auto` | Tool profile: `minimal` / `local-tui` / `remote-tui` / `persistent-tui` / `full` / `auto` |
+| `TERMINAL_USE_EXTRA_TOOLS` | _(empty)_ | Comma-separated tools to add beyond the selected profile |
+| `TERMINAL_USE_DISABLED_TOOLS` | _(empty)_ | Comma-separated tools to remove from the selected profile |
+| `TERMINAL_USE_SECRET_ENV_POLICY` | `deny` | Secret env var handling: `deny` / `warn` / `allow` |
+| `TERMINAL_USE_SSH_AGENT_DISCOVERY` | `xdg` | SSH agent socket discovery mode: `env-only` / `xdg` / `scan` |
+| `TERMINAL_USE_SESSION_ID_MATCH` | `lenient` | Session ID matching mode: `strict` / `lenient` |
+| `TERMINAL_USE_AUDIT_LOG` | `1` | Audit log enabled: `1` / `0` |

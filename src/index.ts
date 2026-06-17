@@ -10,6 +10,7 @@
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import { join } from "node:path"
 
 import { loadConfig } from "./config.js"
 import { createLogger } from "./logger.js"
@@ -17,18 +18,22 @@ import { SessionManager } from "./session-manager.js"
 import { createAndRegisterProviders } from "./providers/provider-registry.js"
 import { createMcpServer } from "./mcp-server.js"
 import { loadHostsConfig } from "./targets/ssh-host-config.js"
+import { mergeSshDefaultsIntoAllProfiles } from "./targets/ssh-defaults-merge.js"
+import { createAuditLogger } from "./audit-log.js"
+import { VERSION } from "./version.js"
 
 async function main(): Promise<void> {
   const config = loadConfig()
   const logger = createLogger(config.logLevel)
 
   logger.info("terminal-use-mcp starting", {
-    version: "0.2.0",
+    version: VERSION,
     workspaceRoot: config.workspaceRoot,
     defaultProvider: config.defaultProvider,
   })
 
-  const hostsConfig = await loadHostsConfig(config.hostsConfigPath)
+  const rawHostsConfig = await loadHostsConfig(config.hostsConfigPath)
+  const hostsConfig = mergeSshDefaultsIntoAllProfiles(rawHostsConfig, config.sshDefaults)
   logger.info("SSH hosts config loaded", {
     profiles: hostsConfig.size,
     customPathConfigured: config.hostsConfigPath !== undefined,
@@ -36,8 +41,12 @@ async function main(): Promise<void> {
 
   /* 创建 SessionManager 并注册所有已知 provider；
    * 各 provider 的 isAvailable() 会在首次使用时异步检测。 */
-  const sm = new SessionManager(config, logger)
-  createAndRegisterProviders(sm, logger, config.enabledProviders)
+  const auditLogPath = config.auditLogEnabled
+    ? join(config.artifactDir, "audit.ndjson")
+    : undefined
+  const auditLogger = createAuditLogger(auditLogPath, config.capabilityPreset, config.toolProfile)
+  const sm = new SessionManager(config, logger, auditLogger)
+  createAndRegisterProviders(sm, logger, config.enabledProviders, config.capabilityPreset, config.secretEnvPolicy)
   if (sm.getProviders().size === 0) {
     logger.error("no terminal providers available")
     process.exit(1)
@@ -47,7 +56,7 @@ async function main(): Promise<void> {
   sm.startTtlCleanup()
 
   /* 创建已注册全部 tools/resources/prompts 的 MCP Server */
-  const server = createMcpServer(sm, config, hostsConfig, logger)
+  const server = createMcpServer(sm, config, hostsConfig, logger, auditLogger)
 
   /* 连接 stdio transport */
   const transport = new StdioServerTransport()

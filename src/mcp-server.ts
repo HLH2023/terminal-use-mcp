@@ -1,5 +1,5 @@
 /**
- * MCP Server 工厂 — 创建 McpServer 实例并注册全部 29 tools + resources + prompts。
+ * MCP Server 工厂 — 创建 McpServer 实例并根据配置动态注册 tools + resources + prompts。
  *
  * 由 index.ts 调用 createMcpServer(sm, config, hostsConfig, logger)，
  * 返回已就绪的 McpServer 实例，只需连接 StdioServerTransport 即可启动。
@@ -10,9 +10,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { SessionManager } from "./session-manager.js"
 import type { TerminalUseConfig } from "./config.js"
 import type { Logger } from "./logger.js"
+import type { AuditLogger } from "./audit-log.js"
 import type { ProviderName, TerminalProvider } from "./providers/provider.js"
 import type { SshHostProfile } from "./targets/target-types.js"
 import { ProviderExecutor } from "./tools/tool-helpers.js"
+import { resolveEnabledTools } from "./tools/tool-registry.js"
+import type { ToolRegistryResult } from "./tools/tool-registry.js"
 import { VERSION } from "./version.js"
 
 // ── 22 Session tools ───────────────────────────────────────────
@@ -73,6 +76,7 @@ export function createMcpServer(
   config: TerminalUseConfig,
   hostsConfig: Map<string, SshHostProfile>,
   logger: Logger,
+  auditLogger: AuditLogger,
 ): McpServer {
   const server = new McpServer({
     name: "terminal-use-mcp",
@@ -84,7 +88,7 @@ export function createMcpServer(
    * ProviderExecutor 构造函数接受 ReadonlyMap<string, TerminalProvider>，
    * 二者类型兼容（ProviderName 是 string 的子类型）。 */
   const providers = sm.getProviders()
-  const executor = new ProviderExecutor(sm, providers)
+  const executor = new ProviderExecutor(sm, providers, undefined, auditLogger)
 
   /* health / provider_capabilities 需要可变 Map<ProviderName, TerminalProvider>，
    * 从 ReadonlyMap 构造一份可变副本。 */
@@ -100,44 +104,66 @@ export function createMcpServer(
       : [],
   )
 
-  // ── Session lifecycle (7) ──
-  registerStartTool(server, sm, logger, config)
-  registerAttachTool(server, sm, logger)
-  registerListTool(server, sm, logger)
-  registerInfoTool(server, sm, logger)
-  registerRenameTool(server, sm, logger)
-  registerKillTool(server, sm, logger)
-  registerCleanupTool(server, sm, logger)
+  // 解析工具集
+  const toolRegistry = resolveEnabledTools({
+    toolProfile: config.toolProfile,
+    capabilityPreset: config.capabilityPreset,
+    enabledTools: config.enabledTools,
+    extraTools: config.extraTools,
+    disabledTools: config.disabledTools,
+  })
+  const enabledToolSet = new Set(toolRegistry.registeredTools)
 
-  // ── Observation + Input (8) ──
-  registerSnapshotTool(server, executor, logger)
-  registerWaitForTextTool(server, executor, logger)
-  registerWaitStableTool(server, executor, logger)
-  registerFindTool(server, executor, logger)
-  registerScrollTool(server, executor, logger)
-  registerTypeTool(server, executor, logger)
-  registerPressTool(server, executor, logger)
-  registerPasteTool(server, executor, logger, config)
-  registerMouseClickTool(server, executor, logger)
-  registerMouseScrollTool(server, executor, logger)
+  if (toolRegistry.configWarnings.length > 0) {
+    for (const w of toolRegistry.configWarnings) {
+      logger.warn(w)
+    }
+  }
+
+  // Helper: only register if tool is enabled
+  const registerIf = (name: string, fn: () => void): void => {
+    if (enabledToolSet.has(name)) fn()
+  }
+
+  // ── Session lifecycle (7) ──
+  registerIf("terminal.start", () => registerStartTool(server, sm, logger, config))
+  registerIf("terminal.attach", () => registerAttachTool(server, sm, logger))
+  registerIf("terminal.list", () => registerListTool(server, sm, logger))
+  registerIf("terminal.info", () => registerInfoTool(server, sm, logger))
+  registerIf("terminal.rename", () => registerRenameTool(server, sm, logger))
+  registerIf("terminal.kill", () => registerKillTool(server, sm, logger))
+  registerIf("terminal.cleanup", () => registerCleanupTool(server, sm, logger))
+
+  // ── Observation + Input (10) ──
+  registerIf("terminal.snapshot", () => registerSnapshotTool(server, executor, logger))
+  registerIf("terminal.wait_for_text", () => registerWaitForTextTool(server, executor, logger))
+  registerIf("terminal.wait_stable", () => registerWaitStableTool(server, executor, logger))
+  registerIf("terminal.find", () => registerFindTool(server, executor, logger))
+  registerIf("terminal.scroll", () => registerScrollTool(server, executor, logger))
+  registerIf("terminal.type", () => registerTypeTool(server, executor, logger))
+  registerIf("terminal.press", () => registerPressTool(server, executor, logger))
+  registerIf("terminal.paste", () => registerPasteTool(server, executor, logger, config))
+  registerIf("terminal.mouse_click", () => registerMouseClickTool(server, executor, logger))
+  registerIf("terminal.mouse_scroll", () => registerMouseScrollTool(server, executor, logger))
 
   // ── Meta (7) ──
-  registerResizeTool(server, executor)
-  registerExportTranscriptTool(server, sm, config.artifactDir)
-  registerHealthTool(server, mutableProviders, disabledProviders, VERSION)
-  registerKeysTool(server)
-  registerProviderCapabilitiesTool(server, mutableProviders)
-  registerEventsTool(server, executor)
-  registerSendSignalTool(server, executor)
+  registerIf("terminal.resize", () => registerResizeTool(server, executor))
+  registerIf("terminal.export_transcript", () => registerExportTranscriptTool(server, sm, config.artifactDir))
+  // terminal.health 始终注册（resolveEnabledTools 保证其始终在 registeredTools 中）
+  registerHealthTool(server, mutableProviders, disabledProviders, VERSION, config, toolRegistry, hostsConfig)
+  registerIf("terminal.keys", () => registerKeysTool(server))
+  registerIf("terminal.provider_capabilities", () => registerProviderCapabilitiesTool(server, mutableProviders))
+  registerIf("terminal.events", () => registerEventsTool(server, executor))
+  registerIf("terminal.send_signal", () => registerSendSignalTool(server, executor))
 
   // ── Remote targets (3) ──
-  registerTargetsTool(server, hostsConfig, logger)
-  registerTargetInfoTool(server, hostsConfig, logger)
-  registerVerifyTargetTool(server, sm, hostsConfig, logger)
+  registerIf("terminal.targets", () => registerTargetsTool(server, hostsConfig, logger))
+  registerIf("terminal.target_info", () => registerTargetInfoTool(server, hostsConfig, logger))
+  registerIf("terminal.verify_target", () => registerVerifyTargetTool(server, sm, hostsConfig, logger))
 
   // ── Tmux management (2) ──
-  registerTmuxListTool(server, executor, logger, hostsConfig)
-  registerTmuxKillTool(server, executor, logger, hostsConfig)
+  registerIf("terminal.tmux_list", () => registerTmuxListTool(server, executor, logger, hostsConfig))
+  registerIf("terminal.tmux_kill", () => registerTmuxKillTool(server, executor, logger, hostsConfig))
 
   // ── Resources (2) ──
   registerSessionsResource(server, sm)
@@ -148,7 +174,7 @@ export function createMcpServer(
   registerExternalAgentControlPrompt(server)
 
   logger.info("MCP server configured", {
-    tools: 29,
+    tools: toolRegistry.registeredTools.length,
     resources: 2,
     prompts: 2,
   })

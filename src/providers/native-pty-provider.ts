@@ -43,6 +43,9 @@ import {
 } from "../terminal/mouse.js"
 import type { MouseClickEvent, MouseScrollEvent } from "../terminal/mouse.js"
 import { containsSecrets, getDetectedSecretTypes } from "../terminal/redact.js"
+import { checkSecretEnvPolicy } from "../terminal/secret-env-policy.js"
+import type { SecretEnvPolicy } from "../config.js"
+import { SecretEnvDeniedError } from "../terminal/errors.js"
 import { createSnapshot } from "../terminal/terminal-snapshot.js"
 import type { Highlight, TerminalSnapshot, TerminalSnapshotMode } from "../terminal/terminal-snapshot.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
@@ -128,16 +131,23 @@ type NativePtySession = {
   lastSnapshotTime: number
 }
 
+export type NativePtyProviderOptions = {
+  /** 秘密环境变量策略；统一从 config 层传入，默认 "deny"。 */
+  secretEnvPolicy?: SecretEnvPolicy
+}
+
 export class NativePtyProvider implements TerminalProvider {
   readonly name: ProviderName = "native-pty"
   readonly capabilities: ProviderCapabilities = NATIVE_PTY_CAPABILITIES
 
   private sessions: Map<string, NativePtySession>
   private logger: Logger
+  private readonly secretEnvPolicy: SecretEnvPolicy
 
-  constructor(logger: Logger) {
+  constructor(logger: Logger, options?: NativePtyProviderOptions) {
     this.sessions = new Map()
     this.logger = logger
+    this.secretEnvPolicy = options?.secretEnvPolicy ?? "deny"
   }
 
   /**
@@ -152,6 +162,14 @@ export class NativePtyProvider implements TerminalProvider {
     const ptyModule = await loadNodePty()
     if (ptyModule === null) {
       throw new ProviderNotAvailableError(this.name, "node-pty not available")
+    }
+
+    // 检查 input.env 中的疑似 secret 环境变量
+    if (input.env !== undefined && Object.keys(input.env).length > 0) {
+      const secretCheck = checkSecretEnvPolicy(input.env, this.secretEnvPolicy)
+      if (!secretCheck.allowed) {
+        throw new SecretEnvDeniedError(secretCheck.deniedKeys)
+      }
     }
 
     const sessionId = generateSessionId()

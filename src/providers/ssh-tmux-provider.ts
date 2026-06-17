@@ -17,7 +17,7 @@ import type {
 import type { ParsedKeyExpr } from "../terminal/keymap.js"
 import type { Highlight, TerminalSnapshot, TerminalSnapshotMode } from "../terminal/terminal-snapshot.js"
 import type { Logger } from "../logger.js"
-import type { SshHostProfile } from "../targets/target-types.js"
+import type { RemoteCwdPolicy, SshHostProfile } from "../targets/target-types.js"
 import type { ResolvedSshTarget } from "../targets/ssh-profile-loader.js"
 import type { SystemSshCommandResult, SystemSshTransport } from "./system-ssh-transport.js"
 import { XtermAdapter } from "../terminal/xterm-adapter.js"
@@ -36,7 +36,10 @@ import { validateRegexSafety, createSafeRegex } from "../terminal/command-safety
 import type { ScreenState } from "../terminal/wait.js"
 import { TranscriptRecorder } from "../terminal/transcript.js"
 import { generateSessionId } from "../terminal/ids.js"
-import { createRemoteCwdPolicy, assertRemoteCwdAllowed } from "../targets/remote-cwd-policy.js"
+import { checkSecretEnvPolicy } from "../terminal/secret-env-policy.js"
+import type { SecretEnvPolicy } from "../config.js"
+import { shellQuote } from "../terminal/shell-quote.js"
+import { createRemoteCwdPolicy, assertRemoteCwdAllowed, validateCanonicalRemoteCwd } from "../targets/remote-cwd-policy.js"
 import { remoteCapabilityCache, type RemoteCapabilities, type RemoteCapabilityCache } from "../targets/remote-capability-cache.js"
 import { expandUserPath, loadHostsConfig } from "../targets/ssh-host-config.js"
 import { resolveSshTarget } from "../targets/ssh-profile-loader.js"
@@ -44,12 +47,14 @@ import {
   DependencyMissingError,
   ProcessExitedError,
   RemoteCommandDeniedError,
+  RemoteCwdDeniedError,
   RemoteTmuxNotAvailableError,
+  SecretEnvDeniedError,
   SessionNotFoundError,
   SessionTimeoutError,
   TerminalUseError,
 } from "../terminal/errors.js"
-import { execRemote, execSshCommand, isSystemSshAvailable } from "./system-ssh-transport.js"
+import { execRemote, execSshCommand, isSystemSshAvailable, type ExecSshCommandOptions } from "./system-ssh-transport.js"
 import {
   cleanupTempKnownHosts,
   verifyPinnedFingerprintOrThrow,
@@ -107,6 +112,10 @@ export type SshTmuxProviderOptions = {
   capabilityCache?: RemoteCapabilityCache
   /** ssh-keyscan fingerprint 验证器；生产默认使用 verifyPinnedFingerprintOrThrow，测试可注入 mock。 */
   keyscanVerifier?: (profile: ResolvedSshTarget) => Promise<{ tempKnownHostsPath: string; matchedFingerprint: string }>
+  /** 原始远程命令执行器；用于 canonical CWD preflight 等非 tmux 命令，默认使用 execRemote。 */
+  rawCommandExecutor?: (target: ResolvedSshTarget, command: string, options?: ExecSshTmuxOptions) => Promise<SystemSshCommandResult>
+  /** 秘密环境变量策略；统一从 config 层传入，默认 "deny"。 */
+  secretEnvPolicy?: SecretEnvPolicy
 }
 
 type SshTmuxSession = {
@@ -189,6 +198,8 @@ export class SshTmuxProvider implements TerminalProvider {
   private readonly sshAvailabilityChecker: () => Promise<boolean>
   private readonly capabilityCache: RemoteCapabilityCache
   private readonly keyscanVerifier: (profile: ResolvedSshTarget) => Promise<{ tempKnownHostsPath: string; matchedFingerprint: string }>
+  private readonly rawCommandExecutor: (target: ResolvedSshTarget, command: string, options?: ExecSshTmuxOptions) => Promise<SystemSshCommandResult>
+  private readonly secretEnvPolicy: SecretEnvPolicy
   private sshAvailable: boolean | undefined
 
   constructor(logger: Logger, options: SshTmuxProviderOptions = {}) {
@@ -200,6 +211,8 @@ export class SshTmuxProvider implements TerminalProvider {
     this.sshAvailabilityChecker = options.sshAvailabilityChecker ?? isSystemSshAvailable
     this.capabilityCache = options.capabilityCache ?? remoteCapabilityCache
     this.keyscanVerifier = options.keyscanVerifier ?? verifyPinnedFingerprintOrThrow
+    this.rawCommandExecutor = options.rawCommandExecutor ?? createDefaultRawCommandExecutor()
+    this.secretEnvPolicy = options.secretEnvPolicy ?? "deny"
     this.sshAvailable = undefined
   }
 
@@ -226,6 +239,25 @@ export class SshTmuxProvider implements TerminalProvider {
     const caps = await this.discoverCapabilities(target, verifiedKnownHosts)
     const tmuxPath = ensureRemoteTmuxUsable(this.name, target, caps)
     const remoteCwd = assertRemoteCwdAllowed(createRemoteCwdPolicy(target), input.cwd)
+
+    // 检查 input.env 和 profile.env 中的疑似 secret 环境变量
+    const secretPolicy = this.secretEnvPolicy
+    if (input.env !== undefined && Object.keys(input.env).length > 0) {
+      const secretCheck = checkSecretEnvPolicy(input.env, secretPolicy)
+      if (!secretCheck.allowed) {
+        throw new SecretEnvDeniedError(secretCheck.deniedKeys)
+      }
+    }
+    if (target.env !== undefined && Object.keys(target.env).length > 0) {
+      const secretCheck = checkSecretEnvPolicy(target.env, secretPolicy)
+      if (!secretCheck.allowed) {
+        throw new SecretEnvDeniedError(secretCheck.deniedKeys)
+      }
+    }
+
+    // Remote CWD canonical preflight：在远端执行 pwd -P 获取真实路径，防止 symlink 绕过。
+    const canonicalCwd = await preflightCanonicalRemoteCwdForTmux(this.rawCommandExecutor, target, remoteCwd, createRemoteCwdPolicy(target), verifiedKnownHosts)
+
     const sessionId = generateSessionId()
 
     const tmuxId = createSshTmuxSessionName()
@@ -248,7 +280,7 @@ export class SshTmuxProvider implements TerminalProvider {
         "-y",
         input.rows.toString(),
         "-c",
-        remoteCwd,
+        canonicalCwd,
         ...envArgs,
         "--",
         loginInteractiveCommand,
@@ -271,7 +303,7 @@ export class SshTmuxProvider implements TerminalProvider {
       providerSessionId: tmuxId,
       command: input.command,
       args: input.args,
-      cwd: remoteCwd,
+      cwd: canonicalCwd,
       label: input.label,
       status: "running",
       exitCode: null,
@@ -930,10 +962,6 @@ function buildShellExecCommand(command: string, args: string[]): string {
   return `exec ${[command, ...args].map(shellQuote).join(" ")}`
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/gu, `'\\''`)}'`
-}
-
 function parseTmuxListEntry(line: string): SshTmuxListEntry {
   const [name = "", createdRaw = "", colsRaw = "80", rowsRaw = "24"] = line.split(LIST_SEPARATOR)
   const createdSeconds = Number(createdRaw)
@@ -1043,4 +1071,51 @@ function isRemoteTmuxMissing(output: string): boolean {
 
 function isRemoteSessionMissing(output: string): boolean {
   return /can't find session|no server running|no such session|session not found/i.test(output)
+}
+
+/** 默认 rawCommandExecutor：封装 execRemote 的签名转换。 */
+function createDefaultRawCommandExecutor(): (target: ResolvedSshTarget, command: string, options?: ExecSshTmuxOptions) => Promise<SystemSshCommandResult> {
+  return async (target, command, options) => {
+    const keyFile = target.auth.type === "key-file" ? expandUserPath(target.auth.path) : undefined
+    const effectiveKnownHosts = options?.overrideKnownHosts
+      ?? (target.knownHosts !== undefined ? expandUserPath(target.knownHosts) : undefined)
+    const execOptions: ExecSshCommandOptions = {
+      keyFile,
+      connectTimeoutMs: target.connectTimeoutMs,
+      execTimeoutMs: options?.timeoutMs ?? SSH_TMUX_EXEC_TIMEOUT_MS,
+      knownHosts: effectiveKnownHosts,
+    }
+    return execRemote(target, command, execOptions)
+  }
+}
+
+/**
+ * 远程 CWD canonical preflight（ssh-tmux）：
+ * 在远端执行 cd + pwd -P 获取真实路径，防止 symlink 绕过 string-based CWD 检查。
+ *
+ * 失败时拒绝启动（fail-closed）。
+ * 使用 this.rawCommandExecutor 以便测试注入 mock。
+ */
+async function preflightCanonicalRemoteCwdForTmux(
+  rawExecutor: (target: ResolvedSshTarget, command: string, options?: ExecSshTmuxOptions) => Promise<SystemSshCommandResult>,
+  target: ResolvedSshTarget,
+  cwd: string,
+  policy: RemoteCwdPolicy,
+  overrideKnownHosts?: string,
+): Promise<string> {
+  const safeCwd = shellQuote(cwd)
+  const command = `cd ${safeCwd} && pwd -P`
+
+  const result = await rawExecutor(target, command, { timeoutMs: SSH_TMUX_EXEC_TIMEOUT_MS, overrideKnownHosts })
+
+  if (result.exitCode !== 0) {
+    throw new RemoteCwdDeniedError(cwd, `Canonical preflight failed (exit ${result.exitCode}): ${result.stderr}`)
+  }
+
+  const canonicalPath = result.stdout.trim()
+  if (!canonicalPath.startsWith("/")) {
+    throw new RemoteCwdDeniedError(cwd, `Canonical preflight returned invalid path: "${canonicalPath}"`)
+  }
+
+  return validateCanonicalRemoteCwd(policy, canonicalPath)
 }

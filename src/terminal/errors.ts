@@ -32,6 +32,9 @@ export type TerminalUseErrorCode =
   | "REMOTE_CWD_DENIED"
   | "REMOTE_TMUX_NOT_AVAILABLE"
   | "REMOTE_COMMAND_DENIED"
+  | "PROXY_JUMP_UNSUPPORTED"
+  | "SECRET_ENV_DENIED"
+  | "SESSION_AMBIGUOUS"
 
 export type ErrorEnvelope = {
   ok: false
@@ -268,5 +271,35 @@ export class RemoteTmuxNotAvailableError extends TerminalUseError {
 export class RemoteCommandDeniedError extends TerminalUseError {
   constructor(command: string, reason: string) {
     super({ code: "REMOTE_COMMAND_DENIED", message: `Remote command denied: ${command} (${reason})`, retryable: false, hint: "Remote command policy only gates terminal.start; ask the user before high-risk actions", details: { command, reason } })
+  }
+}
+
+export class ProxyJumpUnsupportedError extends TerminalUseError {
+  constructor(provider: string) {
+    super({ code: "PROXY_JUMP_UNSUPPORTED", message: `${provider} does not support ProxyJump in v0.2.0. Use remote-persistent capability / ssh-tmux, or remove proxyJump.`, provider, retryable: false, hint: "Use ssh-tmux provider (remote-persistent capability) which supports ProxyJump via system SSH, or remove proxyJump from the profile." })
+  }
+}
+
+export class SecretEnvDeniedError extends TerminalUseError {
+  constructor(keys: string[]) {
+    super({
+      code: "SECRET_ENV_DENIED",
+      message: `Environment variables suspected to contain secrets: ${keys.join(", ")}`,
+      retryable: false,
+      hint: "Set TERMINAL_USE_SECRET_ENV_POLICY=warn or allow to proceed, or remove secret env vars from input",
+      details: { keys },
+    })
+  }
+}
+
+export class SessionAmbiguousError extends TerminalUseError {
+  constructor(sessionId: string, candidates: string[]) {
+    super({
+      code: "SESSION_AMBIGUOUS",
+      message: `Session ID "${sessionId}" matches multiple sessions: ${candidates.join(", ")}`,
+      retryable: false,
+      hint: "Use the exact session ID. Run terminal.list to see all active sessions.",
+      details: { sessionId, candidates },
+    })
   }
 }

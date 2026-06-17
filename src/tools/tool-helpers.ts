@@ -22,6 +22,8 @@ import type {
 } from "../providers/provider.js"
 import type { SshHostProfile, TerminalTarget } from "../targets/target-types.js"
 import type { ResolvedSshTarget } from "../targets/ssh-profile-loader.js"
+import type { AuditLogger } from "../audit-log.js"
+import { auditAllow } from "../audit-log.js"
 import { execSshTmux } from "../providers/ssh-tmux-provider.js"
 import { loadHostsConfig } from "../targets/ssh-host-config.js"
 import { resolveSshTarget } from "../targets/ssh-profile-loader.js"
@@ -209,6 +211,7 @@ export class ProviderExecutor {
     private readonly sm: SessionManager,
     private readonly providers: ProviderExecutorProviders,
     private readonly hostsConfig?: ReadonlyMap<string, SshHostProfile>,
+    private readonly auditLogger?: AuditLogger,
   ) {}
 
   async executeTmuxList(input: TmuxToolTargetInput = {}): Promise<TmuxSessionInfo[]> {
@@ -329,11 +332,13 @@ export class ProviderExecutor {
   async executeSnapshot(sessionId: string, mode: TerminalSnapshotMode = "viewport"): Promise<TerminalSnapshot> {
     const session = this.sm.getSession(sessionId)
     const provider = this.getProvider(session.providerName)
-    return session.queue.enqueue(async () => {
+    const result = await session.queue.enqueue(async () => {
       const snapshot = await provider.snapshot(session.providerSessionId, mode)
       this.recordSnapshot(session, snapshot)
       return snapshot
     })
+    this.auditLogger?.log(auditAllow("terminal.snapshot", { sessionId }))
+    return result
   }
 
   async executeWaitForText(sessionId: string, text: string, options: WaitOptions): Promise<TerminalSnapshot> {
@@ -402,6 +407,10 @@ export class ProviderExecutor {
       session.transcript.recordInput(`<mouse:click:${input.button}@${input.col},${input.row}>`)
       this.sm.touchSession(session.sessionId)
     })
+    this.auditLogger?.log(auditAllow("terminal.mouse_click", {
+      sessionId,
+      input: { mouseCol: input.col, mouseRow: input.row, mouseButton: input.button },
+    }))
   }
 
   async executeMouseScroll(sessionId: string, input: MouseScrollInput, lines: number): Promise<void> {
@@ -418,6 +427,10 @@ export class ProviderExecutor {
       session.transcript.recordInput(`<mouse:scroll:${input.direction}x${lines}@${input.col},${input.row}>`)
       this.sm.touchSession(session.sessionId)
     })
+    this.auditLogger?.log(auditAllow("terminal.mouse_scroll", {
+      sessionId,
+      input: { mouseCol: input.col, mouseRow: input.row, mouseDirection: input.direction },
+    }))
   }
 
   async executeType(sessionId: string, text: string): Promise<void> {
@@ -428,6 +441,10 @@ export class ProviderExecutor {
       session.transcript.recordInput(text)
       this.sm.touchSession(session.sessionId)
     })
+    this.auditLogger?.log(auditAllow("terminal.type", {
+      sessionId,
+      input: { textLength: text.length },
+    }))
   }
 
   async executePress(sessionId: string, keyExpr: string, parsed: ParsedKeyExpr): Promise<void> {
@@ -438,6 +455,10 @@ export class ProviderExecutor {
       session.transcript.recordInput(`<${keyExpr}>`)
       this.sm.touchSession(session.sessionId)
     })
+    this.auditLogger?.log(auditAllow("terminal.press", {
+      sessionId,
+      input: { keyExpr },
+    }))
   }
 
   async executePaste(sessionId: string, text: string, mode: "bracketed" | "line-by-line" | "raw" | undefined): Promise<void> {
@@ -448,6 +469,10 @@ export class ProviderExecutor {
       session.transcript.recordInput(text)
       this.sm.touchSession(session.sessionId)
     })
+    this.auditLogger?.log(auditAllow("terminal.paste", {
+      sessionId,
+      input: { pasteLength: text.length, pasteMode: mode ?? "bracketed" },
+    }))
   }
 
   /** 终端尺寸变更：检查 provider 能力后通过 queue 串行执行 resize。 */
@@ -499,6 +524,8 @@ export class ProviderExecutor {
     if (signal !== "SIGINT") {
       this.sm.removeSession(sessionId)
     }
+
+    this.auditLogger?.log(auditAllow("terminal.send_signal", { sessionId }))
   }
 
   private getProvider(name: string): TerminalProvider {

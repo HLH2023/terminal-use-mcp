@@ -5,6 +5,8 @@
  * 未在白名单中的 provider 不注册，也不参与 provider 选择。
  */
 
+import type { CapabilityPreset, SecretEnvPolicy } from "../config.js"
+import { resolveProvidersFromPreset } from "../capability-preset.js"
 import type { Logger } from "../logger.js"
 import type { SessionManager } from "../session-manager.js"
 import type { ProviderName, TerminalProvider } from "./provider.js"
@@ -15,30 +17,43 @@ import { TmuxProvider } from "./tmux-provider.js"
 
 type ProviderEntry = {
   name: ProviderName
-  create: (logger: Logger) => TerminalProvider
+  create: (logger: Logger, secretEnvPolicy: SecretEnvPolicy) => TerminalProvider
   optional: boolean
 }
 
 const PROVIDER_ENTRIES: ProviderEntry[] = [
-  { name: "native-pty", create: (logger) => new NativePtyProvider(logger), optional: true },
-  { name: "tmux", create: (logger) => new TmuxProvider(logger), optional: false },
-  { name: "ssh-pty", create: (logger) => new SshPtyProvider(logger), optional: true },
-  { name: "ssh-tmux", create: (logger) => new SshTmuxProvider(logger), optional: true },
+  { name: "native-pty", create: (logger, secretEnvPolicy) => new NativePtyProvider(logger, { secretEnvPolicy }), optional: true },
+  { name: "tmux", create: (logger, secretEnvPolicy) => new TmuxProvider(logger, { secretEnvPolicy }), optional: false },
+  { name: "ssh-pty", create: (logger, secretEnvPolicy) => new SshPtyProvider(logger, { secretEnvPolicy }), optional: true },
+  { name: "ssh-tmux", create: (logger, secretEnvPolicy) => new SshTmuxProvider(logger, { secretEnvPolicy }), optional: true },
 ]
 
 /**
  * 创建并注册 provider 到 SessionManager。
  *
- * @param enabledProviders 白名单。空数组=全部启用。
+ * @param sm                SessionManager 实例
+ * @param logger            日志记录器
+ * @param enabledProviders  显式启用的 provider 白名单。空数组=全部启用（向后兼容）
+ * @param capabilityPreset  能力预设（仅在 enabledProviders 未显式设置时生效）
+ * @param secretEnvPolicy   秘密环境变量策略（统一从 config 层传入，避免 provider 直读 process.env）
  */
 export function createAndRegisterProviders(
   sm: SessionManager,
   logger: Logger,
   enabledProviders: ProviderName[] = [],
+  capabilityPreset?: CapabilityPreset,
+  secretEnvPolicy: SecretEnvPolicy = "deny",
 ): void {
-  const enabledSet = enabledProviders.length > 0
-    ? new Set(enabledProviders)
-    : null
+  // 如果 enabledProviders 非空，使用显式白名单；否则根据 preset 推导，最后 fallback 到全部启用
+  const providersToEnable = enabledProviders.length > 0
+    ? enabledProviders
+    : capabilityPreset && capabilityPreset !== "custom"
+      ? resolveProvidersFromPreset(capabilityPreset)
+      : Array.from(PROVIDER_ENTRIES.map((e) => e.name))
+
+  const enabledSet = providersToEnable.length === PROVIDER_ENTRIES.length
+    ? null // 全部启用，不需要 filter
+    : new Set(providersToEnable)
 
   const disabled: ProviderName[] = []
 
@@ -50,7 +65,7 @@ export function createAndRegisterProviders(
     }
 
     try {
-      sm.registerProvider(entry.create(logger))
+      sm.registerProvider(entry.create(logger, secretEnvPolicy))
     } catch (err) {
       if (entry.optional) {
         logger.warn("provider not available", {

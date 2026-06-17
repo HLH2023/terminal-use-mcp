@@ -10,11 +10,11 @@ import {
   quoteWindowsPath,
   resolveSshPtyAuthConnectConfig,
   resolveSshPtyTarget,
-  shellQuote,
   SshPtyDirtyTracker,
   SshPtyProvider,
   verifyPresentedHostKey,
 } from "../../src/providers/ssh-pty-provider.js"
+import { shellQuote } from "../../src/terminal/shell-quote.js"
 import type { ResolvedSshTarget } from "../../src/targets/ssh-profile-loader.js"
 import type { SshHostProfile } from "../../src/targets/target-types.js"
 import { computeHostFingerprint } from "../../src/targets/host-fingerprint.js"

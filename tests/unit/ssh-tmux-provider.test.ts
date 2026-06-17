@@ -66,7 +66,6 @@ function createProviderWithExecutor(
   const executor: SshTmuxCommandExecutor = async (_profile, args, _options) => {
     calls.push([...args])
     if (handler !== undefined) return handler(args)
-    if (args.includes("pwd")) return ok("/home/tester/project\n")
     return ok()
   }
   const provider = new SshTmuxProvider(logger, {
@@ -74,6 +73,7 @@ function createProviderWithExecutor(
     commandExecutor: executor,
     sshAvailabilityChecker: async () => true,
     capabilityCache: new RemoteCapabilityCache([["devbox", capabilities]]),
+    rawCommandExecutor: async (_target, _command, _options) => ok("/home/tester/project"),
   })
   return { provider, calls }
 }

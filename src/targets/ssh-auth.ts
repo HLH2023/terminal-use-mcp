@@ -23,6 +23,7 @@ import path from "node:path"
 import type { SshAuthRef } from "./target-types.js"
 import { expandTildePath } from "./ssh-host-config.js"
 import { logger } from "../logger.js"
+import type { SshAgentDiscoveryMode } from "../config.js"
 
 /** 已解析的 SSH 认证配置 */
 export type ResolvedSshAuth =
@@ -30,9 +31,12 @@ export type ResolvedSshAuth =
   | { type: "key-file"; path: string; passphraseAvailable: boolean }
 
 /** 将 profile 中的认证引用解析为 provider 可用的具体配置。 */
-export async function resolveSshAuth(auth: SshAuthRef): Promise<ResolvedSshAuth> {
+export async function resolveSshAuth(
+  auth: SshAuthRef,
+  discoveryMode: SshAgentDiscoveryMode = "xdg",
+): Promise<ResolvedSshAuth> {
   if (auth.type === "agent") {
-    const socket = auth.socket !== undefined ? expandTildePath(auth.socket) : getSshAgentSocket()
+    const socket = auth.socket !== undefined ? expandTildePath(auth.socket) : getSshAgentSocket(discoveryMode)
     if (socket === undefined || socket.trim().length === 0) {
       throw new Error("SSH agent socket not found; set SSH_AUTH_SOCK or configure auth.socket")
     }
@@ -56,22 +60,28 @@ export async function resolveSshAuth(auth: SshAuthRef): Promise<ResolvedSshAuth>
 }
 
 /**
- * 获取 ssh-agent socket — 增强发现链。
+ * 获取 ssh-agent socket — 受 discovery mode 控制的发现链。
  *
- * 优先级（高→低）：
- * 1. SSH_AUTH_SOCK 环境变量（MCP 客户端传入）
- * 2. XDG_RUNTIME_DIR/ssh-agent.socket（systemd user service）
- * 3. XDG_RUNTIME_DIR/keyring/ssh（GNOME Keyring）
- * 4. 运行时扫描 ss -x --no-header（兜底）
+ * mode 语义：
+ * - env-only: 只检查 SSH_AUTH_SOCK 环境变量
+ * - xdg: SSH_AUTH_SOCK → XDG_RUNTIME_DIR 常见路径
+ * - scan: SSH_AUTH_SOCK → XDG_RUNTIME_DIR → ss -x runtime scan（兜底）
+ *
+ * 默认建议 xdg：覆盖大多数 systemd/GNOME 环境，不做 runtime scan。
  *
  * profile 中的 auth.socket 显式传参在 resolveSshAuth 中优先于本函数。
  * 本函数只处理"没有显式指定 socket"时的自动发现。
  */
-export function getSshAgentSocket(): string | undefined {
-  // 1. SSH_AUTH_SOCK 环境变量（MCP 客户端最常传入的方式）
+export function getSshAgentSocket(mode: SshAgentDiscoveryMode = "xdg"): string | undefined {
+  // 1. SSH_AUTH_SOCK 环境变量（所有 mode 都检查）
   const envSocket = process.env.SSH_AUTH_SOCK
   if (envSocket !== undefined && envSocket.trim().length > 0) {
     return envSocket
+  }
+
+  // env-only mode: 只到这里就结束
+  if (mode === "env-only") {
+    return undefined
   }
 
   // 2+3. XDG_RUNTIME_DIR 常见路径
@@ -88,7 +98,12 @@ export function getSshAgentSocket(): string | undefined {
     return xdgMatch
   }
 
-  // 4. 运行时扫描兜底：通过 ss -x --no-header 查找 UNIX domain socket
+  // xdg mode: 到这里就结束，不做 runtime scan
+  if (mode === "xdg") {
+    return undefined
+  }
+
+  // scan mode: 运行时扫描兜底
   const scannedSocket = scanAgentSocket()
   if (scannedSocket !== undefined) {
     logger.info("SSH agent socket found via runtime scan", { socket: scannedSocket })

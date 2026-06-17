@@ -17,9 +17,21 @@ import type { CwdPolicyMode } from "./terminal/command-safety.js"
 import { logger } from "./logger.js"
 import { getConfigFilePath, ensureConfigDir, getDataDir } from "./targets/xdg-paths.js"
 import { RootConfigSchema, expandEnvVars, expandTildeInObject } from "./targets/config-schema.js"
+import { resolveProvidersFromPreset } from "./capability-preset.js"
 
 /** 所有已知 provider 名称，用于 enabledProviders 默认值 */
 const ALL_PROVIDER_NAMES: ProviderName[] = ["native-pty", "tmux", "ssh-pty", "ssh-tmux"]
+
+/** 能力预设：控制 provider/tool 自动组合 */
+export type CapabilityPreset = "local" | "remote" | "persistent" | "remote-persistent" | "full" | "custom"
+/** 工具配置预设：控制注册的工具集 */
+export type ToolProfile = "auto" | "minimal" | "local-tui" | "remote-tui" | "persistent-tui" | "full" | "custom"
+/** SSH agent socket 发现模式 */
+export type SshAgentDiscoveryMode = "env-only" | "xdg" | "scan"
+/** 秘密环境变量策略 */
+export type SecretEnvPolicy = "deny" | "warn" | "allow"
+/** Session ID 匹配模式 */
+export type SessionIdMatchMode = "strict" | "lenient"
 
 export type TerminalUseConfig = {
   workspaceRoot: string
@@ -44,6 +56,24 @@ export type TerminalUseConfig = {
   enabledProviders: ProviderName[]
   /** 是否保存原始（未脱敏）transcript 文件。默认 false — 只保存脱敏版防止泄露秘密。 */
   storeRawTranscript: boolean
+  /** 能力预设 */
+  capabilityPreset: CapabilityPreset
+  /** 工具配置预设 */
+  toolProfile: ToolProfile
+  /** 显式启用的工具列表 */
+  enabledTools: string[]
+  /** 额外追加的工具列表 */
+  extraTools: string[]
+  /** 禁用的工具列表 */
+  disabledTools: string[]
+  /** SSH agent socket 发现模式 */
+  sshAgentDiscoveryMode: SshAgentDiscoveryMode
+  /** 秘密环境变量策略 */
+  secretEnvPolicy: SecretEnvPolicy
+  /** Session ID 匹配模式 */
+  sessionIdMatchMode: SessionIdMatchMode
+  /** 是否启用审计日志 */
+  auditLogEnabled: boolean
 }
 
 export type SshDefaultsConfig = {
@@ -144,12 +174,22 @@ type RootConfigFileData = {
     artifactDir?: string
     logLevel?: "debug" | "info" | "warn" | "error"
     providers?: string[]
+    capabilityPreset?: CapabilityPreset
+    toolProfile?: ToolProfile
+    tools?: string[]
+    extraTools?: string[]
+    disabledTools?: string[]
+    sshAgentDiscoveryMode?: SshAgentDiscoveryMode
+    secretEnvPolicy?: SecretEnvPolicy
+    sessionIdMatchMode?: SessionIdMatchMode
+    auditLogEnabled?: boolean
   }
   sshDefaults?: {
     remoteDeniedCwd?: string[]
     allowTmux?: boolean
     connectTimeoutMs?: number
     keepaliveIntervalMs?: number
+    agentDiscoveryMode?: SshAgentDiscoveryMode
   }
 }
 
@@ -167,6 +207,34 @@ function mergeCsvWithFileDefault(envValue: string | undefined, fileValue: string
   return fileValue ?? fallback
 }
 
+const VALID_CAPABILITY_PRESETS = new Set<CapabilityPreset>(["local", "remote", "persistent", "remote-persistent", "full", "custom"])
+const VALID_TOOL_PROFILES = new Set<ToolProfile>(["auto", "minimal", "local-tui", "remote-tui", "persistent-tui", "full", "custom"])
+const VALID_SSH_AGENT_DISCOVERY_MODES = new Set<SshAgentDiscoveryMode>(["env-only", "xdg", "scan"])
+const VALID_SECRET_ENV_POLICIES = new Set<SecretEnvPolicy>(["deny", "warn", "allow"])
+const VALID_SESSION_ID_MATCH_MODES = new Set<SessionIdMatchMode>(["strict", "lenient"])
+
+/**
+ * 通用枚举配置解析：环境变量 > 配置文件 > 默认值。
+ *
+ * 环境变量做大小写无关归一化，非法值 warn 并 fallback。
+ */
+function parseEnumWithFallback<T extends string>(
+  envValue: string | undefined,
+  fileValue: T | undefined,
+  validValues: ReadonlySet<T>,
+  fallback: T,
+  envVarName: string,
+): T {
+  if (envValue !== undefined && envValue.trim().length > 0) {
+    const normalized = envValue.trim().toLowerCase() as T
+    if (validValues.has(normalized)) return normalized
+    logger.warn(`${envVarName}: invalid value "${envValue}", falling back to "${fallback}"`, { validValues: Array.from(validValues) })
+    return fallback
+  }
+  if (fileValue !== undefined && validValues.has(fileValue)) return fileValue
+  return fallback
+}
+
 export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseConfig {
   const env = process.env
 
@@ -179,10 +247,36 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
   const local = fileConfig?.local
   const sshDefaults = fileConfig?.sshDefaults
 
+  // 解析 capabilityPreset（需要在 enabledProviders 之前，因为 preset 影响 provider 选择）
+  // 区分「未显式设置」与「显式设置为 local」：未设置时 preset=undefined，保留全量 provider 的向后兼容行为
+  const envPresetRaw = env.TERMINAL_USE_CAPABILITY_PRESET?.trim() ?? ""
+  const isCapabilityPresetExplicit = envPresetRaw.length > 0 || local?.capabilityPreset !== undefined
+  const capabilityPreset = parseEnumWithFallback(
+    env.TERMINAL_USE_CAPABILITY_PRESET,
+    local?.capabilityPreset,
+    VALID_CAPABILITY_PRESETS,
+    "local",
+    "TERMINAL_USE_CAPABILITY_PRESET",
+  )
+  const capabilityPresetForProviders = isCapabilityPresetExplicit ? capabilityPreset : undefined
+
+  // 同理：toolProfile 未显式设置时，向后兼容=全部 tools
+  const envToolProfileRaw = env.TERMINAL_USE_TOOL_PROFILE?.trim() ?? ""
+  const isToolProfileExplicit = envToolProfileRaw.length > 0 || local?.toolProfile !== undefined
+  const toolProfile = parseEnumWithFallback(
+    env.TERMINAL_USE_TOOL_PROFILE,
+    local?.toolProfile,
+    VALID_TOOL_PROFILES,
+    "auto",
+    "TERMINAL_USE_TOOL_PROFILE",
+  )
+  const toolProfileForRegistry = isToolProfileExplicit ? toolProfile : "full"
+
   // 分层合并：文件默认值 → 环境变量覆盖
   const enabledProviders = parseEnabledProviders(
     env.TERMINAL_USE_PROVIDERS,
     local?.providers,
+    capabilityPresetForProviders,
   )
   const config: TerminalUseConfig = {
     workspaceRoot: env.TERMINAL_USE_WORKSPACE_ROOT ?? local?.workspaceRoot ?? process.cwd(),
@@ -222,6 +316,15 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
       keepaliveIntervalMs: sshDefaults?.keepaliveIntervalMs ?? 15000,
     },
     enabledProviders,
+    capabilityPreset,
+    toolProfile: toolProfileForRegistry,
+    enabledTools: splitCsv(env.TERMINAL_USE_TOOLS).length > 0 ? splitCsv(env.TERMINAL_USE_TOOLS) : local?.tools ?? [],
+    extraTools: splitCsv(env.TERMINAL_USE_EXTRA_TOOLS).length > 0 ? splitCsv(env.TERMINAL_USE_EXTRA_TOOLS) : local?.extraTools ?? [],
+    disabledTools: splitCsv(env.TERMINAL_USE_DISABLED_TOOLS).length > 0 ? splitCsv(env.TERMINAL_USE_DISABLED_TOOLS) : local?.disabledTools ?? [],
+    sshAgentDiscoveryMode: parseEnumWithFallback(env.TERMINAL_USE_SSH_AGENT_DISCOVERY, sshDefaults?.agentDiscoveryMode ?? local?.sshAgentDiscoveryMode, VALID_SSH_AGENT_DISCOVERY_MODES, "xdg", "TERMINAL_USE_SSH_AGENT_DISCOVERY"),
+    secretEnvPolicy: parseEnumWithFallback(env.TERMINAL_USE_SECRET_ENV_POLICY, local?.secretEnvPolicy, VALID_SECRET_ENV_POLICIES, "deny", "TERMINAL_USE_SECRET_ENV_POLICY"),
+    sessionIdMatchMode: parseEnumWithFallback(env.TERMINAL_USE_SESSION_ID_MATCH, local?.sessionIdMatchMode, VALID_SESSION_ID_MATCH_MODES, "lenient", "TERMINAL_USE_SESSION_ID_MATCH"),
+    auditLogEnabled: env.TERMINAL_USE_AUDIT_LOG !== undefined ? env.TERMINAL_USE_AUDIT_LOG === "1" : local?.auditLogEnabled ?? true,
   }
 
   return { ...config, ...overrides }
@@ -230,14 +333,16 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
 /**
  * 解析启用的 provider 列表。
  *
- * 优先级：环境变量 TERMINAL_USE_PROVIDERS > config.json local.providers > 全部启用
+ * 优先级：环境变量 TERMINAL_USE_PROVIDERS > config.json local.providers > capabilityPreset > 全部启用
  * 环境变量格式：逗号分隔，如 "native-pty,tmux"
  * 无效名称会被过滤并输出 warn 日志
  */
 function parseEnabledProviders(
   envValue: string | undefined,
   fileValue: string[] | undefined,
+  preset?: CapabilityPreset,
 ): ProviderName[] {
+  // 1. TERMINAL_USE_PROVIDERS 显式设置 → 最高优先级
   const raw = envValue?.trim() ?? ""
   if (raw.length > 0) {
     return splitCsv(raw).filter((name): name is ProviderName => {
@@ -246,6 +351,7 @@ function parseEnabledProviders(
       return false
     })
   }
+  // 2. config.json local.providers
   if (fileValue !== undefined && fileValue.length > 0) {
     return fileValue.filter((name): name is ProviderName => {
       if (ALL_PROVIDER_NAMES.includes(name as ProviderName)) return true
@@ -253,5 +359,10 @@ function parseEnabledProviders(
       return false
     })
   }
+  // 3. Capability preset 映射
+  if (preset && preset !== "custom") {
+    return resolveProvidersFromPreset(preset)
+  }
+  // 4. 默认全部启用
   return [...ALL_PROVIDER_NAMES]
 }

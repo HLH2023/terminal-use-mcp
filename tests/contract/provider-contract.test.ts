@@ -13,6 +13,7 @@ import { createLogger } from "../../src/logger.js"
 import { SessionManager } from "../../src/session-manager.js"
 import type { ManagedSession } from "../../src/session-manager.js"
 import { ProviderExecutor } from "../../src/tools/tool-helpers.js"
+import { createNoopAuditLogger } from "../../src/audit-log.js"
 import type { TerminalProvider, ProviderName, StartInput, TerminalSession } from "../../src/providers/provider.js"
 import type { TerminalSnapshot } from "../../src/terminal/terminal-snapshot.js"
 import {
@@ -163,7 +164,7 @@ function createTestSessionManager(overrides?: Record<string, unknown>): {
     artifactDir: "/tmp/terminal-use-mcp-test-artifacts",
   })
   const logger = createLogger("error") // 最小化日志输出
-  const sm = new SessionManager(config, logger)
+  const sm = new SessionManager(config, logger, createNoopAuditLogger())
   return { sm, logger, config }
 }
 

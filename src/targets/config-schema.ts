@@ -243,6 +243,24 @@ export const LocalConfigSchema = z.object({
   logLevel: z.enum(["debug", "info", "warn", "error"]).optional(),
   /** 启用的 provider 列表（对应 TERMINAL_USE_PROVIDERS） */
   providers: z.array(z.enum(["native-pty", "tmux", "ssh-pty", "ssh-tmux"])).optional(),
+  /** 能力预设：控制 provider/tool 自动组合 */
+  capabilityPreset: z.enum(["local", "remote", "persistent", "remote-persistent", "full", "custom"]).optional(),
+  /** 工具配置预设：控制注册的工具集 */
+  toolProfile: z.enum(["auto", "minimal", "local-tui", "remote-tui", "persistent-tui", "full", "custom"]).optional(),
+  /** 显式启用的工具列表（仅 custom 模式下生效） */
+  tools: z.array(z.string().min(1)).optional(),
+  /** 额外追加的工具列表（在预设基础上追加） */
+  extraTools: z.array(z.string().min(1)).optional(),
+  /** 禁用的工具列表（从预设中排除） */
+  disabledTools: z.array(z.string().min(1)).optional(),
+  /** SSH agent socket 发现模式 */
+  sshAgentDiscoveryMode: z.enum(["env-only", "xdg", "scan"]).optional(),
+  /** 秘密环境变量策略 */
+  secretEnvPolicy: z.enum(["deny", "warn", "allow"]).optional(),
+  /** Session ID 匹配模式 */
+  sessionIdMatchMode: z.enum(["strict", "lenient"]).optional(),
+  /** 是否启用审计日志 */
+  auditLogEnabled: z.boolean().optional(),
 })
 
 export type LocalConfigInput = z.input<typeof LocalConfigSchema>
@@ -259,6 +277,8 @@ export const SshDefaultsSchema = z.object({
   connectTimeoutMs: z.number().int().positive().optional(),
   /** 全局 keepalive 间隔（毫秒） */
   keepaliveIntervalMs: z.number().int().positive().optional(),
+  /** SSH agent socket 发现模式 */
+  agentDiscoveryMode: z.enum(["env-only", "xdg", "scan"]).optional(),
 })
 
 export type SshDefaultsInput = z.input<typeof SshDefaultsSchema>

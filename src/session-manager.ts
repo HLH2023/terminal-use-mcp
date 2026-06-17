@@ -17,9 +17,12 @@ import type {
 import type { TerminalSnapshot } from "./terminal/terminal-snapshot.js"
 import type { TerminalUseConfig } from "./config.js"
 import type { Logger } from "./logger.js"
+import type { AuditLogger } from "./audit-log.js"
+import { auditAllow, auditDeny } from "./audit-log.js"
 import {
   InvalidCwdError,
   ProviderNotAvailableError,
+  SessionAmbiguousError,
   SessionNotFoundError,
   TerminalUseError,
   UnsafeCommandError,
@@ -103,13 +106,15 @@ export class SessionManager {
   private providers: Map<ProviderName, TerminalProvider>
   private config: TerminalUseConfig
   private logger: Logger
+  private auditLogger: AuditLogger
   private cleanupTimer: ReturnType<typeof setInterval> | undefined
 
-  constructor(config: TerminalUseConfig, logger: Logger) {
+  constructor(config: TerminalUseConfig, logger: Logger, auditLogger: AuditLogger) {
     this.sessions = new Map()
     this.providers = new Map()
     this.config = config
     this.logger = logger
+    this.auditLogger = auditLogger
     this.cleanupTimer = undefined
 
     this.runBestEffortArtifactWrite("ensure artifact root", undefined, () => {
@@ -145,6 +150,17 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session)
     this.touchSession(session.sessionId)
     this.persistSessionArtifacts(session, "start")
+
+    // 审计日志：记录 terminal.start 的 allow 决策
+    this.auditLogger.log(auditAllow("terminal.start", {
+      sessionId: session.sessionId,
+      command: session.command,
+      cwd: session.cwd,
+      target: input.target?.kind === "ssh"
+        ? { kind: "ssh", profile: input.target.profile }
+        : { kind: "local" },
+    }))
+
     this.logger.info("terminal session started", {
       sessionId: session.sessionId,
       provider: session.providerName,
@@ -167,6 +183,15 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session)
     this.touchSession(session.sessionId)
     this.persistSessionArtifacts(session, "attach")
+
+    // 审计日志：记录 terminal.attach 的 allow 决策
+    this.auditLogger.log(auditAllow("terminal.attach", {
+      sessionId: session.sessionId,
+      command: session.command,
+      cwd: session.cwd,
+      target: { kind: "local" },
+    }))
+
     this.logger.info("terminal session attached", { sessionId: session.sessionId, provider: session.providerName })
 
     return session
@@ -184,11 +209,11 @@ export class SessionManager {
 
   /** 获取 session (不存在时抛 SessionNotFoundError) */
   getSession(sessionId: string): ManagedSession {
-    // 精确匹配
+    // 精确匹配 — 所有模式都尝试
     let session = this.sessions.get(sessionId)
     if (session !== undefined) return session
 
-    // 剥离已知 provider 前缀再试
+    // 剥离已知 provider 前缀再试（strict 和 lenient 都允许）
     const stripped = SessionManager.stripProviderPrefix(sessionId)
     if (stripped !== sessionId) {
       session = this.sessions.get(stripped)
@@ -198,16 +223,39 @@ export class SessionManager {
       }
     }
 
-    // 模糊后缀匹配：遍历所有活跃 session，查找 sessionId 后缀一致的
-    // 防御 LLM 各种非标准变形（如添加未知前缀、混合大小写等）
-    for (const [key, sess] of this.sessions) {
+    // strict 模式到此为止
+    if (this.config.sessionIdMatchMode === "strict") {
+      this.auditLogger.log(auditDeny("getSession", `Session not found: ${sessionId}`, { sessionId }))
+      throw new SessionNotFoundError(sessionId)
+    }
+
+    // lenient 模式：模糊后缀匹配
+    const candidates: string[] = []
+    for (const [key] of this.sessions) {
       if (key.endsWith(sessionId) || sessionId.endsWith(key)) {
-        this.logger.warn("session lookup: fuzzy suffix match", { original: sessionId, resolved: key })
-        return sess
+        candidates.push(key)
       }
     }
 
-    throw new SessionNotFoundError(sessionId)
+    if (candidates.length === 0) {
+      this.auditLogger.log(auditDeny("getSession", `Session not found: ${sessionId}`, { sessionId }))
+      throw new SessionNotFoundError(sessionId)
+    }
+
+    if (candidates.length > 1) {
+      this.auditLogger.log(auditDeny("getSession", `Ambiguous session ID: ${sessionId}`, { sessionId }))
+      throw new SessionAmbiguousError(sessionId, candidates)
+    }
+
+    // Exactly one candidate
+    const matchedKey = candidates[0]!
+    const matchedSession = this.sessions.get(matchedKey)
+    if (matchedSession === undefined) {
+      this.auditLogger.log(auditDeny("getSession", `Session not found: ${sessionId}`, { sessionId }))
+      throw new SessionNotFoundError(sessionId)
+    }
+    this.logger.warn("session lookup: fuzzy suffix match", { original: sessionId, resolved: matchedKey })
+    return matchedSession
   }
 
   /** 列出所有 session */
@@ -238,6 +286,10 @@ export class SessionManager {
     })
 
     this.sessions.delete(sessionId)
+
+    // 审计日志：记录 terminal.kill 的 allow 决策
+    this.auditLogger.log(auditAllow("terminal.kill", { sessionId }))
+
     this.logger.info("terminal session killed", { sessionId, provider: session.providerName })
   }
 
