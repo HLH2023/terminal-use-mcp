@@ -12,3 +12,8 @@ RESUME-CONTEXT.md
 
 # Temp files (relay docs, etc.)
 tmp/
+
+# AI prompt / instruction files (local dev only, not for public release)
+AGENTS.md
+CLAUDE.md
+.opencode/
