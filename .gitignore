@@ -1,1 +1,11 @@
 node_modules/
+dist/
+artifacts/
+
+# Local dev config (contains usernames, paths, SSH profiles)
+.config/
+
+# Dev planning docs (not for public release)
+DEV-PLAN.md
+PROGRESS.md
+RESUME-CONTEXT.md
