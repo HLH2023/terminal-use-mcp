@@ -30,7 +30,7 @@ export function registerHealthTool(
   server: McpServer,
   providers: Map<ProviderName, TerminalProvider>,
   disabledProviders: Set<ProviderName>,
-  version = "0.1.0",
+  version = "0.0.0-dev",
 ): void {
   server.registerTool(
     "terminal.health",

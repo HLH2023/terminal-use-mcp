@@ -196,7 +196,7 @@ describe("MCP Tools Integration", () => {
       const result = response.result as { content: Array<{ type: string; text: string }>; structuredContent: Record<string, unknown> }
       expect(result.structuredContent).toBeDefined()
       expect(result.structuredContent.ok).toBe(true)
-      expect(result.structuredContent.version).toBe("0.1.0")
+      expect(result.structuredContent.version).toBe("0.2.0")
       const providers = result.structuredContent.providers as Record<string, unknown>
       expect(Object.keys(providers).sort()).toEqual(["native-pty", "ssh-pty", "ssh-tmux", "tmux"])
     })

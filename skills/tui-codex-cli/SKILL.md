@@ -1,4 +1,11 @@
+---
+name: tui-codex-cli
+description: 'Control OpenAI Codex CLI TUI via terminal-use-mcp — keybindings, slash commands, permission modes, and interaction flows.'
+---
+
 # tui-codex-cli: Control Codex CLI TUI
+
+> **Reference: Codex CLI v0.140.0** — Keybindings verified against this version. This skill is community-maintained; it is NOT updated in lockstep with Codex CLI releases. If Codex CLI updates break keybindings, update this skill yourself or submit a PR to [GitHub](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills).
 
 > This skill is optional. Only install if you need to control this agent's TUI via terminal-use-mcp.
 

@@ -158,7 +158,7 @@ describe("MCP Stdio Smoke", () => {
     // 服务器信息包含 name 和 version
     const serverInfo = result.serverInfo as Record<string, string>
     expect(serverInfo.name).toBe("terminal-use-mcp")
-    expect(serverInfo.version).toBe("0.1.0")
+    expect(serverInfo.version).toBe("0.2.0")
 
     server.kill("SIGTERM")
   })

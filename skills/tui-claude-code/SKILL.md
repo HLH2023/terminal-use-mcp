@@ -1,4 +1,11 @@
+---
+name: tui-claude-code
+description: 'Control Claude Code TUI via terminal-use-mcp — key mappings, slash commands, permission modes, and interaction flows.'
+---
+
 # tui-claude-code: Control Claude Code TUI
+
+> **Reference: Claude Code v2.1.179** — Keybindings verified against this version. This skill is community-maintained; it is NOT updated in lockstep with Claude Code releases. If Claude Code updates break keybindings, update this skill yourself or submit a PR to [GitHub](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills).
 
 > This skill is optional. Only install if you need to control this agent's TUI via terminal-use-mcp.
 

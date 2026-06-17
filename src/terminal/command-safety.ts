@@ -30,6 +30,9 @@ export type CommandSafetyResult =
   | { ok: true }
   | { ok: false; reason: string; code: "UNSAFE_COMMAND" | "CONFIRMATION_REQUIRED" }
 
+/** CWD 安全策略模式 */
+export type CwdPolicyMode = "guarded" | "strict"
+
 export type CwdSafetyResult =
   | { ok: true }
   | { ok: false; reason: string; code: "INVALID_CWD" }
@@ -568,11 +571,21 @@ function buildDeniedSet(deniedCommands: string[]): Set<string> {
  *
  * Fail-closed：realpath 失败（ENOENT / 权限不足 / symlink 循环）直接拒绝，
  * 绝不 fallback 到字符串比较。
+ *
+ * @param cwd - 待检查的工作目录
+ * @param workspaceRoot - 工作区根目录（始终允许）
+ * @param allowedCwdRoots - 额外允许的工作目录根列表
+ * @param mode - CWD 策略模式：
+ *   - "guarded"（默认）：允许 workspaceRoot + allowedCwdRoots，拒绝危险目录，
+ *     其他目录默认允许。向后兼容。
+ *   - "strict"：仅允许 workspaceRoot + allowedCwdRoots 下的目录，
+ *     其他目录一律拒绝。生产推荐。
  */
 export async function isCwdAllowed(
   cwd: string,
   workspaceRoot: string = process.cwd(),
-  allowedCwdRoots: string[] = []
+  allowedCwdRoots: string[] = [],
+  mode: CwdPolicyMode = "guarded"
 ): Promise<CwdSafetyResult> {
   const resolved = isAbsolute(cwd) ? cwd : resolve(workspaceRoot, cwd)
 
@@ -609,12 +622,22 @@ export async function isCwdAllowed(
   }
 
   // 允许: 用户显式配置的额外 CWD root（canonical path 比较）
-  for (const canonicalRoot of canonicalAllowedRoots) {
-    if (isSubdirectoryCanonical(canonicalCwd, canonicalRoot)) {
+  for (const canonicalAllowedRoot of canonicalAllowedRoots) {
+    if (isSubdirectoryCanonical(canonicalCwd, canonicalAllowedRoot)) {
       return { ok: true }
     }
   }
 
+  // strict 模式：不在白名单内即拒绝
+  if (mode === "strict") {
+    return {
+      ok: false,
+      reason: `CWD "${cwd}" is outside workspaceRoot and allowedCwdRoots under strict cwd policy`,
+      code: "INVALID_CWD",
+    }
+  }
+
+  // guarded 模式：继续执行 denied root 检查
   // 拒绝: 特权目录
   for (const denied of DEFAULT_DENIED_CWD_ROOTS) {
     // 特殊: 如果 workspaceRoot 本身在 /home/xxx 下，允许 workspaceRoot 但拒绝整个 /home
@@ -636,7 +659,7 @@ export async function isCwdAllowed(
     }
   }
 
-  // 默认允许 (如果不匹配任何拒绝规则)
+  // guarded 模式默认允许 (不匹配任何拒绝规则)
   return { ok: true }
 }
 

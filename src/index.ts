@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const logger = createLogger(config.logLevel)
 
   logger.info("terminal-use-mcp starting", {
-    version: "0.1.0",
+    version: "0.2.0",
     workspaceRoot: config.workspaceRoot,
     defaultProvider: config.defaultProvider,
   })

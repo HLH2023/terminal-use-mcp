@@ -152,30 +152,40 @@ Set up terminal-use-mcp with these steps:
       If unsure, leave these unset (default deny mode is safe for most use cases).
 
 3. Install skills:
-   - Core skill (required for all users):
+   - ASK the user: "Do you have npx skills (skills.sh) installed? (Yes / No / Not sure)"
+   - If Yes or Not sure (try first):
+     ASK the user: "Install skills globally (available across all projects) or in this project only? (global / project)"
+     If global: Run: npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup -g
+     If project: Run: npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup
+     If the command fails, fall back to manual download (see below).
+   - If No (manual download):
      Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
      and save to .claude/skills/terminal-use/SKILL.md
-   - Before installing agent-specific skills, ASK the user:
-     "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
-      - Claude Code TUI (tui-claude-code)
-      - Codex CLI TUI (tui-codex-cli)
-      - OpenCode TUI (tui-opencode-native)
-      - OpenCode + OmO plugin TUI (tui-opencode-omo)
-      If unsure, skip them — you can always add them later."
-   - For each confirmed agent, download the corresponding SKILL.md from
+     Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use-setup/SKILL.md
+     and save to .claude/skills/terminal-use-setup/SKILL.md
+   - ASK the user: "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
+     - Claude Code TUI (tui-claude-code)
+     - Codex CLI TUI (tui-codex-cli)
+     - OpenCode TUI (tui-opencode-native)
+     - OpenCode + OmO plugin TUI (tui-opencode-omo)
+     If unsure, skip — you can add them later with: npx skills add HLH2023/terminal-use-mcp -s <skill-name>"
+   - For each confirmed agent: if skills.sh is available, run
+     npx skills add HLH2023/terminal-use-mcp -s <skill-name>
+     (append -g if the user chose global install)
+     Otherwise, download from
      https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
      and save to .claude/skills/<skill-name>/SKILL.md
-   - After downloading, ASK the user:
-     "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
-      If you only use local terminals, I can remove §12-§17 to save ~500 lines.
-      I can also trim reference sections (patterns, error codes, key lists) if you prefer a minimal skill (~80 lines).
-      Should I trim the skill?"
+   - ASK the user: "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
+     If you only use local terminals, I can remove §12-§17 to save ~500 lines.
+     Should I trim the skill?"
 
 4. Restart Claude Code for the config to take effect
 
 5. Verify:
    - Confirm terminal.health, terminal.start etc. appear in the MCP tool list
    - Call terminal.health to confirm server and provider status are OK
+   - Compare the version in terminal.health response with the skill version header (e.g. v0.2.0).
+     If they mismatch, inform the user and suggest updating skills with: npx skills update
 
 Constraints:
 - Do not output any secrets
@@ -223,29 +233,39 @@ Set up terminal-use-mcp with these steps:
       If unsure, leave these unset (default deny mode is safe for most use cases).
 
 3. Install skills:
-   - Core skill (required for all users):
+   - ASK the user: "Do you have npx skills (skills.sh) installed? (Yes / No / Not sure)"
+   - If Yes or Not sure (try first):
+     ASK the user: "Install skills globally (available across all projects) or in this project only? (global / project)"
+     If global: Run: npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup -g
+     If project: Run: npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup
+     If the command fails, fall back to manual download (see below).
+   - If No (manual download):
      Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
      and save to .codex/skills/terminal-use/SKILL.md
-   - Before installing agent-specific skills, ASK the user:
-     "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
-      - Claude Code TUI (tui-claude-code)
-      - Codex CLI TUI (tui-codex-cli)
-      - OpenCode TUI (tui-opencode-native)
-      - OpenCode + OmO plugin TUI (tui-opencode-omo)
-      If unsure, skip them — you can always add them later."
-   - For each confirmed agent, download the corresponding SKILL.md from
+     Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use-setup/SKILL.md
+     and save to .codex/skills/terminal-use-setup/SKILL.md
+   - ASK the user: "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
+     - Claude Code TUI (tui-claude-code)
+     - Codex CLI TUI (tui-codex-cli)
+     - OpenCode TUI (tui-opencode-native)
+     - OpenCode + OmO plugin TUI (tui-opencode-omo)
+     If unsure, skip — you can add them later with: npx skills add HLH2023/terminal-use-mcp -s <skill-name>"
+   - For each confirmed agent: if skills.sh is available, run
+     npx skills add HLH2023/terminal-use-mcp -s <skill-name>
+     (append -g if the user chose global install)
+     Otherwise, download from
      https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
      and save to .codex/skills/<skill-name>/SKILL.md
-   - After downloading, ASK the user:
-     "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
-      If you only use local terminals, I can remove §12-§17 to save ~500 lines.
-      I can also trim reference sections (patterns, error codes, key lists) if you prefer a minimal skill (~80 lines).
-      Should I trim the skill?"
+   - ASK the user: "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
+     If you only use local terminals, I can remove §12-§17 to save ~500 lines.
+     Should I trim the skill?"
 
 4. Restart Codex CLI for the config to take effect
 
 5. Verify:
    - Confirm terminal.health appears when you start a session
+   - Call terminal.health and compare the version with the skill version header (e.g. v0.2.0).
+     If they mismatch, inform the user and suggest updating skills with: npx skills update
 
 Constraints:
 - Do not output any secrets
@@ -291,29 +311,39 @@ Set up terminal-use-mcp with these steps:
        If unsure, leave these unset (default deny mode is safe for most use cases).
 
 3. Install skills:
-   - Core skill (required for all users):
+   - ASK the user: "Do you have npx skills (skills.sh) installed? (Yes / No / Not sure)"
+   - If Yes or Not sure (try first):
+     ASK the user: "Install skills globally (available across all projects) or in this project only? (global / project)"
+     If global: Run: npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup -g
+     If project: Run: npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup
+     If the command fails, fall back to manual download (see below).
+   - If No (manual download):
      Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use/SKILL.md
      and save to .opencode/skills/terminal-use/SKILL.md
-   - Before installing agent-specific skills, ASK the user:
-     "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
-      - Claude Code TUI (tui-claude-code)
-      - Codex CLI TUI (tui-codex-cli)
-      - OpenCode TUI (tui-opencode-native)
-      - OpenCode + OmO plugin TUI (tui-opencode-omo)
-      If unsure, skip them — you can always add them later."
-   - For each confirmed agent, download the corresponding SKILL.md from
+     Download https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/terminal-use-setup/SKILL.md
+     and save to .opencode/skills/terminal-use-setup/SKILL.md
+   - ASK the user: "Do you need to remotely control any of these AI agent TUIs via terminal-use-mcp?
+     - Claude Code TUI (tui-claude-code)
+     - Codex CLI TUI (tui-codex-cli)
+     - OpenCode TUI (tui-opencode-native)
+     - OpenCode + OmO plugin TUI (tui-opencode-omo)
+     If unsure, skip — you can add them later with: npx skills add HLH2023/terminal-use-mcp -s <skill-name>"
+   - For each confirmed agent: if skills.sh is available, run
+     npx skills add HLH2023/terminal-use-mcp -s <skill-name>
+     (append -g if the user chose global install)
+     Otherwise, download from
      https://raw.githubusercontent.com/HLH2023/terminal-use-mcp/main/skills/<skill-name>/SKILL.md
      and save to .opencode/skills/<skill-name>/SKILL.md
-   - After downloading, ASK the user:
-     "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
-      If you only use local terminals, I can remove §12-§17 to save ~500 lines.
-      I can also trim reference sections (patterns, error codes, key lists) if you prefer a minimal skill (~80 lines).
-      Should I trim the skill?"
+   - ASK the user: "The core skill includes both local (§1-§11) and remote SSH (§12-§17) sections.
+     If you only use local terminals, I can remove §12-§17 to save ~500 lines.
+     Should I trim the skill?"
 
 4. Restart OpenCode for the config to take effect
 
 5. Verify:
    - Confirm terminal.health, terminal.start etc. appear in the MCP tool list
+   - Call terminal.health and compare the version with the skill version header (e.g. v0.2.0).
+     If they mismatch, inform the user and suggest updating skills with: npx skills update
 
 Constraints:
 - Do not output any secrets
@@ -324,15 +354,46 @@ Constraints:
 
 ## Skills (Optional)
 
-terminal-use-mcp provides a **core skill** (`terminal-use`, available in the [GitHub repository](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills)) that teaches AI agents how to use the MCP tools correctly. Additionally, there are **agent-specific skills** for controlling external AI agent TUIs. Skills are not included in the npm package — download them from GitHub. Install only the ones you need.
+terminal-use-mcp provides **core skills** (`terminal-use` and `terminal-use-setup`, available in the [GitHub repository](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills)) that teach AI agents how to use the MCP tools correctly and how to configure the server. Additionally, there are **agent-specific skills** for controlling external AI agent TUIs. Skills are not included in the npm package — download them from GitHub. Install only the ones you need.
 
-| Skill | Target Agent | Required? | Install |
-|-------|-------------|-----------|---------|
-| `terminal-use` | All agents | **Yes** (core) | Copy `skills/terminal-use/` into your project's skill directory |
-| `tui-claude-code` | Claude Code TUI | If you remotely control Claude Code | Copy `skills/tui-claude-code/` |
-| `tui-codex-cli` | Codex CLI TUI | If you remotely control Codex CLI | Copy `skills/tui-codex-cli/` |
-| `tui-opencode-native` | OpenCode TUI | If you remotely control OpenCode | Copy `skills/tui-opencode-native/` |
-| `tui-opencode-omo` | OpenCode + OmO plugin | If you remotely control OpenCode with OmO | Copy `skills/tui-opencode-omo/` |
+### Installation via skills.sh (Recommended)
+
+[skills.sh](https://skills.sh) (`npx skills`) provides one-command install and update for skills across 19+ AI agent platforms:
+
+```bash
+# Interactive selection — pick which skills to install (default when repo has multiple skills)
+npx skills add HLH2023/terminal-use-mcp
+
+# Install only core skills (recommended for most users)
+npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup
+
+# Install a specific agent TUI skill
+npx skills add HLH2023/terminal-use-mcp -s tui-claude-code
+
+# Install all skills (core + all agent TUI skills)
+npx skills add HLH2023/terminal-use-mcp --all
+
+# Install globally (available across projects)
+npx skills add HLH2023/terminal-use-mcp -s terminal-use -s terminal-use-setup -g
+
+# Update installed skills to latest
+npx skills update
+```
+
+> **Tip**: Only install the TUI skills you need. For normal terminal automation (lazygit, vim, htop, REPLs), the two core skills are sufficient.
+
+### Manual Installation
+
+Download SKILL.md files from [GitHub](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills) and place them in your agent's skill directory:
+
+| Skill | Required? | Install |
+|-------|-----------|---------|
+| `terminal-use` | **Yes** (core operations) | Copy `skills/terminal-use/` into your project's skill directory |
+| `terminal-use-setup` | **Yes** (core configuration) | Copy `skills/terminal-use-setup/` into your project's skill directory |
+| `tui-claude-code` | If you remotely control Claude Code | Copy `skills/tui-claude-code/` |
+| `tui-codex-cli` | If you remotely control Codex CLI | Copy `skills/tui-codex-cli/` |
+| `tui-opencode-native` | If you remotely control OpenCode | Copy `skills/tui-opencode-native/` |
+| `tui-opencode-omo` | If you remotely control OpenCode with OmO | Copy `skills/tui-opencode-omo/` |
 
 > **When to install agent-specific skills**: Only when you need to **remotely control** another AI agent's TUI (e.g., one agent driving another). For normal terminal automation (lazygit, vim, htop, REPLs), the core skill is sufficient.
 
@@ -389,6 +450,7 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_TMUX_PATH` | Absolute or relative path to tmux binary (when not on PATH) | `tmux` |
 | `TERMINAL_USE_WORKSPACE_ROOT` | CWD policy root | current working directory |
 | `TERMINAL_USE_ALLOWED_CWD` | Allowed working directories (CSV) | _(empty; workspace root is always allowed via TERMINAL_USE_WORKSPACE_ROOT)_ |
+| `TERMINAL_USE_CWD_POLICY_MODE` | CWD policy for local `terminal.start`. `"guarded"` allows workspaceRoot/allowedCwdRoots, blocks known dangerous roots, and allows other non-denied dirs. `"strict"` only allows workspaceRoot/allowedCwdRoots. | `guarded` |
 | `TERMINAL_USE_ALLOW_COMMANDS` | Commands allowed even if on deny list (CSV, overrides deny) | _(empty)_ |
 | `TERMINAL_USE_DENY_COMMANDS` | Extra denied commands beyond built-in list (CSV) | _(empty)_ |
 | `TERMINAL_USE_RISKY_COMMAND_MODE` | How to handle denied commands: `deny`, `ask`, or `allow` | `deny` |
@@ -501,7 +563,7 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 terminal-use-mcp is not a sandbox. Security policies restrict the entry point, not the TUI program's internal behavior.
 
 - **Command allow + deny lists**: Built-in deny list blocks dangerous startup commands (`sudo`, `rm`, `ssh`, `curl`, etc.). `TERMINAL_USE_ALLOW_COMMANDS` overrides the deny list (allow takes priority). `TERMINAL_USE_DENY_COMMANDS` extends it. `TERMINAL_USE_RISKY_COMMAND_MODE` controls how denied commands are handled: `deny` (default, block), `ask` (return confirmation prompt), or `allow` (permit all).
-- **CWD policy**: Only allows working directories within `TERMINAL_USE_WORKSPACE_ROOT` or `TERMINAL_USE_ALLOWED_CWD`
+- **CWD policy**: Controls which directories `terminal.start` can use as working directories. `TERMINAL_USE_WORKSPACE_ROOT` and `TERMINAL_USE_ALLOWED_CWD` define the allowlist. `TERMINAL_USE_CWD_POLICY_MODE` controls the policy mode: `"guarded"` (default) allows workspaceRoot/allowedCwdRoots, blocks known dangerous roots (`/`, `/root`, `/etc`, etc.), and allows other non-denied dirs; `"strict"` only allows dirs within workspaceRoot or allowedCwdRoots — all others are denied. For agent/homelab/remote-ops usage, set `TERMINAL_USE_CWD_POLICY_MODE=strict` to make cwd a true allowlist.
 - **Secret redaction**: Auto-replaces API keys, tokens, private keys with `<REDACTED_*>` in output
 - **Confirmation detection**: Warns when dangerous prompts appear on screen
 - **Provider whitelist**: `TERMINAL_USE_PROVIDERS` controls which providers are enabled (unset = all)
@@ -523,6 +585,46 @@ Remote SSH features let you control TUI programs on remote hosts. Two SSH provid
 SSH targets are defined in `~/.config/terminal-use-mcp/hosts.json`. No password login; ssh-agent or key-file auth only.
 
 See [docs/REMOTE_TERMINAL_GUIDE.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/REMOTE_TERMINAL_GUIDE.md) for full design.
+
+## Version & Updates
+
+### Checking Your Version
+
+Call `terminal.health` — the response includes a `version` field reflecting the running server version.
+
+### npx Caching Behavior
+
+`npx` **does not auto-update**. It caches the package on first run and reuses the cached version until the cache expires. To ensure you're running the latest version:
+
+| Intent | Command |
+|--------|---------|
+| Run latest | `npx -y terminal-use-mcp@latest` |
+| Pin a version | `npx -y terminal-use-mcp@0.2.0` |
+| Force refresh cache | `npx -y terminal-use-mcp@latest` (the `@latest` tag bypasses cache) |
+| Clear npx cache entirely | `npx clear-npx-cache` |
+
+### Skill Versioning
+
+terminal-use-mcp provides two categories of skills:
+
+| Skill | Version Header | Maintenance |
+|-------|---------------|-------------|
+| `terminal-use` (operations) | `terminal-use-mcp vX.Y.Z` — tracks the MCP server version | **Maintained** alongside server releases |
+| `terminal-use-setup` (configuration) | `terminal-use-mcp vX.Y.Z` — tracks the MCP server version | **Maintained** alongside server releases |
+| `tui-*` (agent-specific) | `Reference: <Program> vX.Y.Z` — verified against a specific target version | **Community-maintained** — NOT updated in lockstep with target program releases |
+
+If a TUI program updates and keybindings change, update the corresponding skill yourself or submit a PR. The core `terminal-use` skill is updated with each server release.
+
+### CWD Policy Mode
+
+`TERMINAL_USE_CWD_POLICY_MODE` controls CWD restriction for `terminal.start`:
+
+| Mode | Behavior |
+|------|----------|
+| `guarded` (default) | Allows `workspaceRoot` + `allowedCwd`, blocks known dangerous roots (`/`, `/root`, `/etc`, …), allows other non-denied dirs |
+| `strict` | Only allows `workspaceRoot` + `allowedCwd` — all other dirs denied |
+
+For production/agent usage, set `TERMINAL_USE_CWD_POLICY_MODE=strict` to make CWD a true allowlist.
 
 ## Further Reading
 

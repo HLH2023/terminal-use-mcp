@@ -221,6 +221,8 @@ export const LocalConfigSchema = z.object({
   workspaceRoot: z.string().min(1).optional(),
   /** 额外允许的 CWD 路径 */
   allowedCwdRoots: z.array(z.string().min(1)).optional(),
+  /** CWD 策略模式：guarded（默认允许非危险目录）或 strict（仅允许白名单） */
+  cwdPolicyMode: z.enum(["guarded", "strict"]).optional(),
   /** 额外允许的启动命令 */
   allowedCommands: z.array(z.string().min(1)).optional(),
   /** 额外拒绝的启动命令 */

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, afterEach } from "vitest"
 import {
   SshAuthRefSchema,
   SshHostProfileSchema,
@@ -9,6 +9,7 @@ import {
   expandTildeInPath,
   expandTildeInObject,
 } from "../../src/targets/config-schema.js"
+import { loadConfig } from "../../src/config.js"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -235,5 +236,62 @@ describe("LocalConfigSchema", () => {
   it("负数 sessionTtlMs 被拒绝", () => {
     const result = LocalConfigSchema.safeParse({ sessionTtlMs: -1 })
     expect(result.success).toBe(false)
+  })
+
+  it("cwdPolicyMode: 'guarded' 合法", () => {
+    const result = LocalConfigSchema.safeParse({ cwdPolicyMode: "guarded" })
+    expect(result.success).toBe(true)
+  })
+
+  it("cwdPolicyMode: 'strict' 合法", () => {
+    const result = LocalConfigSchema.safeParse({ cwdPolicyMode: "strict" })
+    expect(result.success).toBe(true)
+  })
+
+  it("cwdPolicyMode: 非法值被拒绝", () => {
+    const result = LocalConfigSchema.safeParse({ cwdPolicyMode: "permissive" })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe("cwdPolicyMode config loading", () => {
+  const originalEnv = process.env.TERMINAL_USE_CWD_POLICY_MODE
+
+  afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env.TERMINAL_USE_CWD_POLICY_MODE = originalEnv
+    } else {
+      delete process.env.TERMINAL_USE_CWD_POLICY_MODE
+    }
+  })
+
+  it("默认值为 'guarded'", () => {
+    delete process.env.TERMINAL_USE_CWD_POLICY_MODE
+    const config = loadConfig()
+    expect(config.cwdPolicyMode).toBe("guarded")
+  })
+
+  it("环境变量 TERMINAL_USE_CWD_POLICY_MODE=strict 生效", () => {
+    process.env.TERMINAL_USE_CWD_POLICY_MODE = "strict"
+    const config = loadConfig()
+    expect(config.cwdPolicyMode).toBe("strict")
+  })
+
+  it("环境变量 TERMINAL_USE_CWD_POLICY_MODE=guarded 生效", () => {
+    process.env.TERMINAL_USE_CWD_POLICY_MODE = "guarded"
+    const config = loadConfig()
+    expect(config.cwdPolicyMode).toBe("guarded")
+  })
+
+  it("环境变量非法值 fallback 到 guarded 并 warn", () => {
+    process.env.TERMINAL_USE_CWD_POLICY_MODE = "permissive"
+    const config = loadConfig()
+    expect(config.cwdPolicyMode).toBe("guarded")
+  })
+
+  it("环境变量大小写不敏感: STRICT → strict", () => {
+    process.env.TERMINAL_USE_CWD_POLICY_MODE = "STRICT"
+    const config = loadConfig()
+    expect(config.cwdPolicyMode).toBe("strict")
   })
 })

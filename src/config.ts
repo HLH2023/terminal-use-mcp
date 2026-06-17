@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { ProviderName } from "./providers/provider.js"
+import type { CwdPolicyMode } from "./terminal/command-safety.js"
 import { logger } from "./logger.js"
 import { getConfigFilePath, ensureConfigDir, getDataDir } from "./targets/xdg-paths.js"
 import { RootConfigSchema, expandEnvVars, expandTildeInObject } from "./targets/config-schema.js"
@@ -23,6 +24,7 @@ const ALL_PROVIDER_NAMES: ProviderName[] = ["native-pty", "tmux", "ssh-pty", "ss
 export type TerminalUseConfig = {
   workspaceRoot: string
   allowedCwdRoots: string[]
+  cwdPolicyMode: CwdPolicyMode
   allowedCommands: string[]
   deniedCommands: string[]
   riskyCommandMode: "deny" | "ask" | "allow"
@@ -54,6 +56,31 @@ export type SshDefaultsConfig = {
 function splitCsv(value: string | undefined): string[] {
   if (!value) return []
   return value.split(",").map((s) => s.trim()).filter(Boolean)
+}
+
+const VALID_CWD_POLICY_MODES = new Set<CwdPolicyMode>(["guarded", "strict"])
+
+/**
+ * 解析 CWD 策略模式配置。
+ *
+ * 优先级：环境变量 > config.json > 代码默认值 ("guarded")
+ * 非法环境变量值 → warn + fallback 到 "guarded"（避免拼写错误导致 server 不可用）
+ */
+function parseCwdPolicyMode(
+  envValue: string | undefined,
+  fileValue: "guarded" | "strict" | undefined,
+): CwdPolicyMode {
+  if (envValue !== undefined && envValue.trim().length > 0) {
+    const normalized = envValue.trim().toLowerCase() as CwdPolicyMode
+    if (VALID_CWD_POLICY_MODES.has(normalized)) {
+      return normalized
+    }
+    logger.warn(`TERMINAL_USE_CWD_POLICY_MODE: invalid value "${envValue}", falling back to "guarded"`, {
+      validValues: ["guarded", "strict"],
+    })
+    return "guarded"
+  }
+  return fileValue ?? "guarded"
 }
 
 /**
@@ -106,6 +133,7 @@ type RootConfigFileData = {
   local?: {
     workspaceRoot?: string
     allowedCwdRoots?: string[]
+    cwdPolicyMode?: "guarded" | "strict"
     allowedCommands?: string[]
     deniedCommands?: string[]
     riskyCommandMode?: "deny" | "ask" | "allow"
@@ -159,6 +187,7 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
   const config: TerminalUseConfig = {
     workspaceRoot: env.TERMINAL_USE_WORKSPACE_ROOT ?? local?.workspaceRoot ?? process.cwd(),
     allowedCwdRoots: mergeCsvWithFileDefault(env.TERMINAL_USE_ALLOWED_CWD, local?.allowedCwdRoots, []),
+    cwdPolicyMode: parseCwdPolicyMode(env.TERMINAL_USE_CWD_POLICY_MODE, local?.cwdPolicyMode),
     allowedCommands: mergeCsvWithFileDefault(env.TERMINAL_USE_ALLOW_COMMANDS, local?.allowedCommands, []),
     deniedCommands: mergeCsvWithFileDefault(env.TERMINAL_USE_DENY_COMMANDS, local?.deniedCommands, []),
     riskyCommandMode: (env.TERMINAL_USE_RISKY_COMMAND_MODE as "deny" | "ask" | "allow") ?? local?.riskyCommandMode ?? "deny",

@@ -13,6 +13,7 @@ import type { Logger } from "./logger.js"
 import type { ProviderName, TerminalProvider } from "./providers/provider.js"
 import type { SshHostProfile } from "./targets/target-types.js"
 import { ProviderExecutor } from "./tools/tool-helpers.js"
+import { VERSION } from "./version.js"
 
 // ── 22 Session tools ───────────────────────────────────────────
 import { registerStartTool } from "./tools/start.js"
@@ -75,7 +76,7 @@ export function createMcpServer(
 ): McpServer {
   const server = new McpServer({
     name: "terminal-use-mcp",
-    version: "0.1.0",
+    version: VERSION,
   })
 
   /* ── 构建 ProviderExecutor ──
@@ -123,7 +124,7 @@ export function createMcpServer(
   // ── Meta (7) ──
   registerResizeTool(server, executor)
   registerExportTranscriptTool(server, sm, config.artifactDir)
-  registerHealthTool(server, mutableProviders, disabledProviders)
+  registerHealthTool(server, mutableProviders, disabledProviders, VERSION)
   registerKeysTool(server)
   registerProviderCapabilitiesTool(server, mutableProviders)
   registerEventsTool(server, executor)

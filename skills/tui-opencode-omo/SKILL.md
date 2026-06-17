@@ -1,4 +1,11 @@
+---
+name: tui-opencode-omo
+description: 'Control OpenCode + Oh My OpenAgent TUI via terminal-use-mcp — vanilla OpenCode controls plus OmO-specific Tab/Prometheus, ultrawork, Team Mode.'
+---
+
 # tui-opencode-omo: Control OpenCode + OmO TUI
+
+> **Reference: OpenCode v1.17.7 + OmO plugin** — Keybindings verified against this version. This skill is community-maintained; it is NOT updated in lockstep with OpenCode or OmO releases. If updates break keybindings, update this skill yourself or submit a PR to [GitHub](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills).
 
 > This skill is optional. Only install if you need to control this agent's TUI via terminal-use-mcp.
 

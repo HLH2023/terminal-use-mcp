@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { StartInput } from "../../src/providers/provider.js"
 import { isCommandSafe, isCommandSafeArgv, isCwdAllowed, maybeWrapWithShell, isSubdirectory, isSubdirectoryCanonical, extractBaseCommandArgv, validateRegexSafety, createSafeRegex } from "../../src/terminal/command-safety.js"
+import type { CwdPolicyMode } from "../../src/terminal/command-safety.js"
 
 function createStartInput(overrides: Partial<StartInput> = {}): StartInput {
   return {
@@ -588,6 +589,219 @@ describe("isCwdAllowed — realpath canonicalize", () => {
     if (!result.ok) {
       expect(result.code).toBe("INVALID_CWD")
     }
+  })
+})
+
+// ============================================================
+// CWD 策略模式测试 (guarded vs strict)
+// ============================================================
+
+describe("isCwdAllowed — guarded mode (default)", () => {
+  let tempDir: string
+  let workspaceRoot: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "tumcp-cwd-guarded-"))
+    workspaceRoot = join(tempDir, "project")
+    mkdirSync(workspaceRoot, { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it("workspaceRoot 自身允许", async () => {
+    const result = await isCwdAllowed(workspaceRoot, workspaceRoot, [], "guarded")
+    expect(result.ok).toBe(true)
+  })
+
+  it("workspaceRoot 子目录允许", async () => {
+    const srcDir = join(workspaceRoot, "src")
+    mkdirSync(srcDir)
+    const result = await isCwdAllowed(srcDir, workspaceRoot, [], "guarded")
+    expect(result.ok).toBe(true)
+  })
+
+  it("allowedCwdRoots 子目录允许", async () => {
+    const optDir = join(tempDir, "opt-workspace")
+    mkdirSync(optDir)
+    const optSub = join(optDir, "project")
+    mkdirSync(optSub)
+    const result = await isCwdAllowed(optSub, workspaceRoot, [optDir], "guarded")
+    expect(result.ok).toBe(true)
+  })
+
+  it("denied root 拒绝（/etc）", async () => {
+    const result = await isCwdAllowed("/etc/config", workspaceRoot, [], "guarded")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_CWD")
+    }
+  })
+
+  it("denied root 拒绝（/usr）", async () => {
+    const result = await isCwdAllowed("/usr/local/bin", workspaceRoot, [], "guarded")
+    expect(result.ok).toBe(false)
+  })
+
+  it("非白名单但非 denied root 的目录允许", async () => {
+    const safeDir = join(tempDir, "safe-temp")
+    mkdirSync(safeDir)
+    const result = await isCwdAllowed(safeDir, workspaceRoot, [], "guarded")
+    expect(result.ok).toBe(true)
+  })
+
+  it("不传 mode 参数时默认为 guarded 行为", async () => {
+    const safeDir = join(tempDir, "safe-temp")
+    mkdirSync(safeDir)
+    const result = await isCwdAllowed(safeDir, workspaceRoot)
+    expect(result.ok).toBe(true)
+  })
+})
+
+describe("isCwdAllowed — strict mode", () => {
+  let tempDir: string
+  let workspaceRoot: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "tumcp-cwd-strict-"))
+    workspaceRoot = join(tempDir, "project")
+    mkdirSync(workspaceRoot, { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it("workspaceRoot 自身允许", async () => {
+    const result = await isCwdAllowed(workspaceRoot, workspaceRoot, [], "strict")
+    expect(result.ok).toBe(true)
+  })
+
+  it("workspaceRoot 子目录允许", async () => {
+    const srcDir = join(workspaceRoot, "src")
+    mkdirSync(srcDir)
+    const result = await isCwdAllowed(srcDir, workspaceRoot, [], "strict")
+    expect(result.ok).toBe(true)
+  })
+
+  it("allowedCwdRoots 子目录允许", async () => {
+    const optDir = join(tempDir, "opt-workspace")
+    mkdirSync(optDir)
+    const optSub = join(optDir, "project")
+    mkdirSync(optSub)
+    const result = await isCwdAllowed(optSub, workspaceRoot, [optDir], "strict")
+    expect(result.ok).toBe(true)
+  })
+
+  it("denied root 拒绝（/etc）", async () => {
+    const result = await isCwdAllowed("/etc/config", workspaceRoot, [], "strict")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_CWD")
+    }
+  })
+
+  it("非白名单但非 denied root 的目录也拒绝", async () => {
+    const outsideDir = join(tempDir, "outside-project")
+    mkdirSync(outsideDir)
+    const result = await isCwdAllowed(outsideDir, workspaceRoot, [], "strict")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_CWD")
+      expect(result.reason).toContain("strict cwd policy")
+    }
+  })
+
+  it("strict 模式拒绝 reason 包含正确描述", async () => {
+    const outsideDir = join(tempDir, "somewhere-else")
+    mkdirSync(outsideDir)
+    const result = await isCwdAllowed(outsideDir, workspaceRoot, [], "strict")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toContain("outside workspaceRoot and allowedCwdRoots")
+      expect(result.reason).toContain("strict cwd policy")
+    }
+  })
+
+  it("/tmp 在 strict 模式下拒绝（不在白名单内）", async () => {
+    const result = await isCwdAllowed("/tmp", workspaceRoot, [], "strict")
+    expect(result.ok).toBe(false)
+  })
+
+  it("/tmp 在 strict + allowedCwdRoots 包含 /tmp 时允许", async () => {
+    const result = await isCwdAllowed("/tmp", workspaceRoot, ["/tmp"], "strict")
+    expect(result.ok).toBe(true)
+  })
+})
+
+describe("isCwdAllowed — symlink defense with cwd policy mode", () => {
+  let tempDir: string
+  let workspaceDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "tumcp-cwd-symlink-"))
+    workspaceDir = join(tempDir, "workspace")
+    mkdirSync(workspaceDir, { recursive: true })
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it("strict 模式：workspace 下 symlink 指向外部目录时拒绝", async () => {
+    const outsideDir = join(tempDir, "outside")
+    mkdirSync(outsideDir)
+    const symlinkPath = join(workspaceDir, "link-to-outside")
+    symlinkSync(outsideDir, symlinkPath)
+
+    const result = await isCwdAllowed(symlinkPath, workspaceDir, [], "strict")
+    // symlink 解析到 workspace 外 — strict 拒绝
+    // 但 realpath 解析后实际上 outsideDir 在 tempDir 下，不在 workspaceDir 下
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_CWD")
+    }
+  })
+
+  it("guarded 模式：workspace 下 symlink 指向 denied root 时拒绝", async () => {
+    const etcSymlink = join(workspaceDir, "etc-link")
+    symlinkSync("/etc", etcSymlink)
+
+    const result = await isCwdAllowed(etcSymlink, workspaceDir, [], "guarded")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_CWD")
+    }
+  })
+
+  it("guarded 模式：workspace 下 symlink 指向非 denied root 外部目录时允许", async () => {
+    const outsideDir = join(tempDir, "outside-safe")
+    mkdirSync(outsideDir)
+    const symlinkPath = join(workspaceDir, "link-to-safe")
+    symlinkSync(outsideDir, symlinkPath)
+
+    const result = await isCwdAllowed(symlinkPath, workspaceDir, [], "guarded")
+    // realpath 解析到 tempDir/outside-safe，不在 denied roots，guarded 允许
+    expect(result.ok).toBe(true)
+  })
+
+  it("strict 模式：workspace 下 symlink 指向 /etc 时拒绝", async () => {
+    const etcSymlink = join(workspaceDir, "etc-link")
+    symlinkSync("/etc", etcSymlink)
+
+    const result = await isCwdAllowed(etcSymlink, workspaceDir, [], "strict")
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.code).toBe("INVALID_CWD")
+    }
+  })
+
+  it("strict 模式：workspace 内正常子目录允许", async () => {
+    const subdir = join(workspaceDir, "src")
+    mkdirSync(subdir)
+    const result = await isCwdAllowed(subdir, workspaceDir, [], "strict")
+    expect(result.ok).toBe(true)
   })
 })
 

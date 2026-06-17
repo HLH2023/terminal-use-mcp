@@ -1,4 +1,11 @@
+---
+name: terminal-use
+description: 'Terminal computer use — control interactive TUI programs via terminal-use-mcp. Snapshot-driven interaction loop with safety policies.'
+---
+
 # terminal-use: Terminal Control Skill
+
+> **terminal-use-mcp v0.2.0** — This skill is maintained alongside the MCP server. **Version check**: call `terminal.health` → compare the `version` field with this header. If server version > skill version, prompt the user to update (`npx skills update` or re-download from [GitHub](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills)). Full versioning details in the `terminal-use-setup` skill.
 
 > **Terminal computer use** — control interactive TUI programs that require keyboard input.
 > This is NOT a shell runner. Use your bash tool for simple commands.
@@ -9,6 +16,7 @@ This skill is designed to be **trimmed to your needs**. Each section is self-con
 
 | Section | Content | Safe to Remove? |
 |---------|---------|-----------------|
+| Pre-flight Check | Version/provider check before first use | ⚠️ Keep — prevents errors from server mismatch or outdated skill |
 | §1 What This Tool Is For | Purpose, when to use/not use | ⚠️ Keep — essential for correct tool usage |
 | §2 Provider Selection | native-pty vs tmux choice, provider availability | ✅ Remove if you always use native-pty |
 | §3 Standard Operation Loop | Core workflow (snapshot → act → wait) | ⚠️ Keep — critical for correct operation |
@@ -18,17 +26,32 @@ This skill is designed to be **trimmed to your needs**. Each section is self-con
 | §7 Common Patterns | 7 usage patterns with examples | ✅ Remove largest section (~130 lines) if your AI learns by doing |
 | §8 Snapshot Structure | Response JSON fields | ✅ Remove — AI can discover from tool output |
 | §9 Error Handling | Error code reference table | ✅ Remove — AI can handle errors reactively |
-| §10 MCP Configuration | Environment variables, stdio transport | ✅ Remove once MCP is configured |
+| §10 Configuration & Setup | Reference to `terminal-use-setup` skill | ✅ Remove if `terminal-use-setup` skill is installed |
 | §11 Checklist | Pre-use decision checklist | ✅ Remove if your AI follows §3 loop reliably |
 | §12 Remote Terminal Control | When to use remote, ACP vs SSH, provider selection | ✅ Remove if you only use local terminals |
 | §13 Remote Safety Rules | 10 non-negotiable remote safety rules | ✅ Remove if you only use local terminals (but ⚠️ keep if using remote) |
 | §14 Remote Tools Reference | targets / target_info / verify_target details | ✅ Remove — AI can discover from tool schemas |
 | §15 Remote Error Codes | SSH-specific error code table | ✅ Remove — AI can handle errors reactively |
 | §16 Remote Operation Patterns | 5 remote usage patterns with examples | ✅ Remove largest section (~150 lines) if your AI learns by doing |
-| §17 Remote MCP Configuration | hosts.json format, env vars, inline SSH control | ✅ Remove once SSH is configured |
+| §17 Remote Configuration | Reference to `terminal-use-setup` skill | ✅ Remove if `terminal-use-setup` skill is installed |
 
-**Minimal viable skill**: §1 + §3 + §6 (~80 lines). Everything else is reference material.
+**Minimal viable skill**: Pre-flight Check + §1 + §3 + §6 (~100 lines). Everything else is reference material.
 **With remote support**: Add §12 + §13 (~80 more lines).
+
+---
+
+## Pre-flight Check (MUST do before first terminal operation in each session)
+
+Before using any `terminal.*` tool for the first time in a session, you MUST call `terminal.health` to:
+
+1. **Verify the server is running** — if `terminal.health` fails, the MCP server is not connected. Inform the user and stop.
+2. **Check provider availability** — the response lists which providers (`native-pty`, `tmux`, `ssh-pty`, `ssh-tmux`) are available and their status. If all providers are disabled or errored, inform the user.
+3. **Detect skill version mismatch** — compare the `version` field in the response with the version header at the top of this SKILL.md:
+   - **Server version == skill version** → OK, proceed.
+   - **Server version > skill version** → Skill is outdated. Prompt the user: *"Your terminal-use skills (v{skill}) are outdated vs server v{server}. Update with `npx skills update` or re-download from GitHub."* You may still proceed with the operation — the skill is likely still functional.
+   - **Server version < skill version** → Server is outdated. Prompt the user: *"Your terminal-use-mcp server (v{server}) is older than the skill (v{skill}). Update the server with `npx -y terminal-use-mcp@latest`."* You may still proceed — backward compatibility is generally maintained.
+
+> **Why this matters**: Without this check, you may encounter unexpected tool errors, missing providers, or behavioral differences between what the skill describes and what the server actually does. One call to `terminal.health` prevents all of these issues.
 
 ---
 
@@ -72,9 +95,9 @@ Two local backends (providers) are available. Choose based on your needs:
 - The session needs to survive if the MCP server restarts
 - You're working with another human who might also attach
 
-> **Provider availability**: The MCP server administrator controls which providers are enabled via the `TERMINAL_USE_PROVIDERS` environment variable. If a provider is disabled, `terminal.health` reports it as `"disabled by TERMINAL_USE_PROVIDERS config"`. You cannot override this — use whichever provider is available.
+> **Provider availability**: Not all providers may be available in your environment. Check `terminal.health` to see which providers are enabled. If a provider is disabled, you cannot override this — use whichever provider is available.
 
-> **Windows**: On native Windows, only `native-pty` is available by default (shell auto-detected via `ComSpec` → `cmd.exe`). The `tmux` provider requires a Unix PTY multiplexer — install [psmux](https://github.com/psmux/psmux) (tmux-compatible, 83 commands, provides `tmux` alias) or use WSL2 where both providers work. If `tmux` is not on PATH on any platform, set `TERMINAL_USE_TMUX_PATH` to its absolute or relative path.
+> **Windows**: On native Windows, only `native-pty` is available by default. The `tmux` provider requires a Unix PTY multiplexer — install [psmux](https://github.com/psmux/psmux) (tmux-compatible, 83 commands, provides `tmux` alias) or use WSL2 where both providers work. See `terminal-use-setup` skill for tmux path configuration.
 
 ## 3. Standard Operation Loop
 
@@ -427,99 +450,16 @@ All errors return structured error envelopes with **stable, machine-readable err
 | `CONFIRMATION_REQUIRED` | Command requires explicit approval (risky mode) | Ask user for permission |
 | `PROCESS_EXITED` | Process has already exited | Start a new session if needed |
 | `DEPENDENCY_MISSING` | Required external tool not found | Install the dependency or use a different provider |
-| `INVALID_CWD` | Working directory not allowed | Use a directory within your workspace |
+| `INVALID_CWD` | Working directory not allowed | Use a directory within `workspaceRoot` or `allowedCwdRoots`. If `cwdPolicyMode` is `strict`, do not bypass by choosing a random system directory; ask the user or choose a cwd under the configured workspace |
 | `INTERNAL_ERROR` | Unexpected internal error | Check stderr logs; report as bug |
 
 All error codes are **stable** — they will not change between versions. Build your error handling logic around these codes.
 
 ---
 
-## 10. MCP Configuration
+## 10. Configuration & Setup
 
-### Add to OpenCode / Codex / Claude Code
-
-Add the following to your MCP configuration (e.g., `mcp.json` or equivalent):
-
-```json
-{
-  "mcpServers": {
-    "terminal-use": {
-      "command": "npx",
-      "args": ["-y", "terminal-use-mcp"],
-      "env": {
-        "TERMINAL_USE_WORKSPACE_ROOT": "/path/to/your/project",
-        "TERMINAL_USE_SESSION_TTL_MS": "3600000",
-        "TERMINAL_USE_ALLOWED_CWD": "/path/to/your/project,/tmp"
-      }
-    }
-  }
-}
-```
-
-### Environment Variables
-
-#### Core Configuration
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `TERMINAL_USE_PROVIDERS` | All providers | Enabled provider whitelist (comma-separated) |
-| `TERMINAL_USE_DEFAULT_PROVIDER` | `native-pty` | Default provider (overrides auto-selection priority) |
-| `TERMINAL_USE_TMUX_PATH` | `tmux` | Absolute or relative path to tmux binary (when not on PATH) |
-| `TERMINAL_USE_WORKSPACE_ROOT` | `process.cwd()` | Root directory for CWD validation |
-| `TERMINAL_USE_ALLOWED_CWD` | _(empty; workspace root is always allowed via TERMINAL_USE_WORKSPACE_ROOT)_ | Comma-separated additional allowed directories |
-| `TERMINAL_USE_ALLOW_COMMANDS` | _(empty)_ | Comma-separated commands to allow despite denylist |
-| `TERMINAL_USE_DENY_COMMANDS` | _(empty)_ | Additional commands to deny |
-| `TERMINAL_USE_RISKY_COMMAND_MODE` | `deny` | How to handle risky commands: `deny`, `ask`, `allow` |
-
-#### Session & Behavior
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `TERMINAL_USE_SESSION_TTL_MS` | `3600000` (1 hour) | Session auto-cleanup timeout |
-| `TERMINAL_USE_CLEANUP_INTERVAL_MS` | `60000` (1 min) | How often to check for expired sessions |
-| `TERMINAL_USE_DEFAULT_COLS` | `120` | Default terminal columns for new sessions |
-| `TERMINAL_USE_DEFAULT_ROWS` | `30` | Default terminal rows for new sessions |
-| `TERMINAL_USE_LARGE_PASTE_LIMIT` | `2000` | Paste size threshold requiring confirmation (characters) |
-| `TERMINAL_USE_HARD_PASTE_LIMIT` | `10000` | Hard paste size limit — pastes above this are always refused (characters) |
-| `TERMINAL_USE_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `TERMINAL_USE_HOSTS_CONFIG` | XDG config dir / hosts.json (profiles/*.json takes priority) | Path to SSH host profiles configuration file |
-| `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set — denied)_ | Set to `1` to allow inline SSH host specification in tool calls |
-| `TERMINAL_USE_STORE_RAW_TRANSCRIPT` | _(not set — only redacted)_ | Set to `1` to also save raw (unredacted) transcript files |
-
-#### Path Overrides
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `TERMINAL_USE_ARTIFACT_DIR` | `<data-dir>/artifacts` | Override artifact/transcript output directory |
-| `TERMINAL_USE_CONFIG_DIR` | See XDG/platform defaults | Override XDG config directory |
-| `TERMINAL_USE_CONFIG_FILE` | `<config-dir>/config.json` | Override config.json file path |
-| `TERMINAL_USE_DATA_DIR` | See XDG/platform defaults | Override XDG data directory (artifact, session data) |
-
-#### XDG / Platform Paths
-
-| Variable | Purpose | Platform |
-|----------|---------|----------|
-| `XDG_CONFIG_HOME` | XDG config home — app appends `terminal-use-mcp/` | Linux, macOS |
-| `XDG_DATA_HOME` | XDG data home — app appends `terminal-use-mcp/` | Linux, macOS |
-| `XDG_RUNTIME_DIR` | XDG runtime directory (used for SSH agent socket discovery) | Linux |
-| `APPDATA` | Windows roaming app data — app appends `terminal-use-mcp/` | Windows |
-| `LOCALAPPDATA` | Windows local app data — app appends `terminal-use-mcp/` | Windows |
-| `ComSpec` | Windows command interpreter path (used by native-pty shell wrapping) | Windows |
-
-#### SSH Authentication
-
-| Variable | Purpose |
-|----------|---------|
-| `SSH_AUTH_SOCK` | SSH agent socket path (auto-discovered if unset; see ssh-auth.ts discovery chain) |
-| `SSH_PROXY_JUMP` | SSH ProxyJump configuration (passed to SSH connection) |
-
-### stdio Transport
-
-The MCP server uses **stdio transport** — it reads from stdin and writes to stdout. All logging goes to stderr. This means:
-
-- **stdout** is reserved for MCP protocol messages — never pipe other output there
-- **stderr** contains structured logs for debugging
-- The server shuts down cleanly on `SIGINT`/`SIGTERM`
+> **MCP configuration, environment variables, version management, and SSH setup** are covered in the separate `terminal-use-setup` skill. Install it alongside this skill if you need to configure or troubleshoot the MCP server.
 
 ---
 
@@ -590,7 +530,7 @@ SSH targets must be defined in a **hosts.json** profile file. This prevents agen
 }
 ```
 
-Inline host specification (host/port/username directly in the call) is **denied by default**. It can be enabled only with the env var `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1`.
+Inline host specification (host/port/username directly in the call) is **denied by default**. It can be enabled by your server administrator — see `terminal-use-setup` skill for details.
 
 ### ssh-pty vs ssh-tmux Selection Guide
 
@@ -776,7 +716,7 @@ These error codes supplement the local error codes in §9. All are returned in t
 | `SSH_AUTH_FAILED` | SSH authentication failed (agent or key-file) | Check ssh-agent is running and has the correct key, or verify key-file path |
 | `SSH_CONNECT_TIMEOUT` | Connection timed out before SSH handshake completed | Check network connectivity, firewall rules, and profile's `connectTimeoutMs` |
 | `SSH_CONNECTION_LOST` | SSH connection dropped after session started | Try `terminal.kill` and restart. If using `ssh-tmux`, the tmux session may still be alive on the remote host |
-| `SSH_INLINE_TARGET_DENIED` | Inline SSH host specification used without env var `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1` | Use a profile instead, or enable inline targets via the env var |
+| `SSH_INLINE_TARGET_DENIED` | Inline SSH host specification used but not enabled by server admin | Use a profile instead, or ask your server admin to enable inline targets |
 | `REMOTE_CWD_DENIED` | Requested cwd not within profile's `remoteAllowedCwd` | Use an allowed directory from the profile, or ask the user to update the profile |
 | `REMOTE_TMUX_NOT_AVAILABLE` | `ssh-tmux` requested but tmux is not installed on the remote host | Use `ssh-pty` instead, or install tmux on the remote host |
 | `REMOTE_COMMAND_DENIED` | Requested remote command blocked by remote command policy | Check if the command is necessary and allowed; ask user for override |
@@ -940,94 +880,6 @@ terminal.kill({ sessionId: "tumcp_p1q2r3" })
 
 ---
 
-## 17. Remote MCP Configuration
+## 17. Remote Configuration
 
-### hosts.json Path
-
-SSH profiles are loaded from:
-
-```
-~/.config/terminal-use-mcp/hosts.json
-```
-
-Or override via environment variable:
-
-```
-TERMINAL_USE_HOSTS_CONFIG=/path/to/hosts.json
-```
-
-### hosts.json Example
-
-```json
-{
-  "hosts": {
-    "devbox": {
-      "host": "192.168.1.20",
-      "port": 22,
-      "username": "hlh",
-      "auth": {
-        "type": "agent"
-      },
-      "knownHosts": "~/.ssh/known_hosts",
-      "defaultCwd": "/home/hlh/dev",
-      "remoteAllowedCwd": [
-        "/home/hlh/dev",
-        "/srv/lab"
-      ],
-      "remoteDeniedCwd": [
-        "/",
-        "/root",
-        "/etc",
-        "/boot",
-        "/proc",
-        "/sys"
-      ],
-      "allowTmux": true,
-      "connectTimeoutMs": 10000,
-      "keepaliveIntervalMs": 15000
-    }
-  }
-}
-```
-
-**Security**: The hosts.json file must NOT contain passwords, private key content, tokens, passphrases, or `.env` values. Key-file auth only stores the file path. Passphrases are referenced by env var name via `passphraseEnv`, never by value.
-
-### Inline SSH Target Control
-
-Inline SSH targets (host/port/username specified directly in the tool call) are **denied by default**. To enable:
-
-```
-TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1
-```
-
-This is intended for development and testing only. Production use should always rely on SSH profiles.
-
-### Remote Environment Variables
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `TERMINAL_USE_HOSTS_CONFIG` | XDG config dir / hosts.json (profiles/*.json takes priority) | Path to SSH host profiles configuration file |
-| `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS` | _(not set)_ | Set to `1` to allow inline SSH host specification in tool calls |
-| `SSH_AUTH_SOCK` | _(auto-discovered)_ | SSH agent socket path (discovered via: `auth.socket` → env var → `XDG_RUNTIME_DIR/ssh-agent.socket` → `XDG_RUNTIME_DIR/keyring/ssh` → runtime scan) |
-| `SSH_PROXY_JUMP` | _(not set)_ | SSH ProxyJump configuration (passed to SSH connection) |
-
-### Full MCP Config with Remote Support
-
-```json
-{
-  "mcpServers": {
-    "terminal-use": {
-      "command": "npx",
-      "args": ["-y", "terminal-use-mcp"],
-      "env": {
-        "TERMINAL_USE_WORKSPACE_ROOT": "/path/to/your/project",
-        "TERMINAL_USE_SESSION_TTL_MS": "3600000",
-        "TERMINAL_USE_ALLOWED_CWD": "/path/to/your/project,/tmp",
-        "TERMINAL_USE_HOSTS_CONFIG": "/home/hlh/.config/terminal-use-mcp/hosts.json"
-      }
-    }
-  }
-}
-```
-
-Do NOT set `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1` in production configurations.
+> **SSH profile configuration, hosts.json format, and remote environment variables** are covered in the `terminal-use-setup` skill (§6 Remote SSH Configuration). Install it alongside this skill if you need to set up or troubleshoot remote access.

@@ -1,4 +1,11 @@
+---
+name: tui-opencode-native
+description: 'Control vanilla OpenCode TUI via terminal-use-mcp — key mappings, command dialog behavior, and interaction flows.'
+---
+
 # tui-opencode-native: Control OpenCode TUI
+
+> **Reference: OpenCode v1.17.7** — Keybindings verified against this version. This skill is community-maintained; it is NOT updated in lockstep with OpenCode releases. If OpenCode updates break keybindings, update this skill yourself or submit a PR to [GitHub](https://github.com/HLH2023/terminal-use-mcp/tree/main/skills).
 
 > This skill is optional. Only install if you need to control this agent's TUI via terminal-use-mcp.
 

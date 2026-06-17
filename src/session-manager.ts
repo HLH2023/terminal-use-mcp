@@ -416,7 +416,7 @@ export class SessionManager {
       return
     }
 
-    const result = await isCwdAllowed(input.cwd, this.config.workspaceRoot, this.config.allowedCwdRoots)
+    const result = await isCwdAllowed(input.cwd, this.config.workspaceRoot, this.config.allowedCwdRoots, this.config.cwdPolicyMode)
     if (!result.ok) {
       throw new InvalidCwdError(input.cwd, result.reason)
     }
