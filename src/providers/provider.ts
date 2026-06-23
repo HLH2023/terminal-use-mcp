@@ -117,6 +117,9 @@ export type FindResult = {
 
 export type ScrollDirection = "up" | "down"
 
+/** 滚动模式 */
+export type ScrollMode = "program-key" | "program-mouse" | "tmux-copy"
+
 /** 鼠标点击输入参数 (tool 层 → provider 层) */
 export type MouseClickInput = {
   col: number
@@ -132,6 +135,7 @@ export type MouseScrollInput = {
   col: number
   row: number
   direction: MouseScrollDirection
+  mode?: ScrollMode
   shift?: boolean
   alt?: boolean
   ctrl?: boolean
@@ -164,7 +168,7 @@ export interface TerminalProvider {
    * 不支持 scrollback 的 provider 会在 capabilities 中标记 supportsScrollback: false。
    */
   find?(sessionId: string, pattern: string, regex?: boolean, includeScrollback?: boolean): Promise<FindResult[]>
-  scroll?(sessionId: string, direction: ScrollDirection, lines: number): Promise<void>
+  scroll?(sessionId: string, direction: ScrollDirection, lines: number, mode?: ScrollMode): Promise<void>
   resize?(sessionId: string, cols: number, rows: number): Promise<void>
   rename?(sessionId: string, label: string): Promise<void>
   /** 注入鼠标点击事件 (SGR-1006 press + release) */

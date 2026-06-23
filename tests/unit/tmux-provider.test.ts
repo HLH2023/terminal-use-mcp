@@ -1,89 +1,125 @@
 /**
  * TmuxProvider 单元测试
  *
- * 覆盖关键路径：isAvailable / start / snapshot / kill / rename / capabilities。
- * 所有外部依赖通过 vi.mock 隔离，不依赖真实 tmux 或终端环境。
+ * 薄壳委托模式下，TmuxProvider 只做接口适配 + 版本检测 + 外部 session 查询。
+ * 核心逻辑由 TmuxCore 实现，transport 由 LocalTmuxTransport 实现。
+ *
+ * 测试策略：mock TmuxCore 和 LocalTmuxTransport，验证 TmuxProvider 的
+ * 接口适配、版本检测、secretEnvPolicy 检查、外部 session 列表等功能。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { createLogger } from "../../src/logger.js"
-import type { StartInput } from "../../src/providers/provider.js"
+import type { StartInput, TerminalSession } from "../../src/providers/provider.js"
 import { TmuxProvider } from "../../src/providers/tmux-provider.js"
-import { SessionNotFoundError } from "../../src/terminal/errors.js"
+import type { TmuxCoreSession } from "../../src/providers/tmux-core.js"
+import {
+  SecretEnvDeniedError,
+  SessionNotFoundError,
+} from "../../src/terminal/errors.js"
 
 // ============================================================
-// Mock: node:child_process (execFile)
+// Mock: TmuxCore
 // ============================================================
 
-/**
- * 模拟 execFile 的行为 — TmuxProvider.execTmux 内部调用 execFile("tmux", args, ...)。
- * 默认让 tmux -V 成功，使 isAvailable 返回 true。
- */
-type ExecFileMockArgs = [
-  cmd: string,
-  args: string[],
-  opts: unknown,
-  callback: (error: Error | null, stdout: string, stderr: string) => void,
-]
-
-const execFileMock = vi.fn((_cmd: string, _args: string[], _opts: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
-  callback(null, "tmux 3.4", "")
-})
-
-vi.mock("node:child_process", () => ({
-  execFile: (...args: ExecFileMockArgs) => {
-    // execFile(cmd, args, opts, callback) 或 execFile(cmd, args, callback)
-    execFileMock(...args)
-  },
-}))
-
-/**
- * 更精确的 mock：直接控制 execFile 的回调结果。
- * 因为 TmuxProvider.execTmux 包装了 Promise，我们直接拦截其私有方法。
- * 实际实现中较难直接 mock 私有 execTmux 方法，所以通过 mock execFile 实现。
- */
-
-// ============================================================
-// Mock: XtermAdapter
-// ============================================================
-
-const mockXtermAdapterInstance = {
-  write: vi.fn(),
-  readScreen: vi.fn(() => ({
-    lines: [{ text: "$ ", hasContent: true }],
-    cursor: { x: 2, y: 0 },
-    cols: 80,
+/** 创建模拟的 TmuxCoreSession */
+function createMockCoreSession(overrides: Partial<TmuxCoreSession> = {}): TmuxCoreSession {
+  return {
+    sessionInfo: {
+      sessionId: "test-session-id",
+      providerName: "tmux",
+      providerSessionId: "tmux_test-session-id",
+      command: "bash",
+      args: [],
+      cwd: "/tmp",
+      label: undefined,
+      status: "running",
+      exitCode: undefined,
+      createdAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      ttlMs: 3600000,
+      ...overrides.sessionInfo,
+    },
+    tmuxId: "tumcp_abcd1234",
+    transport: {} as never,
+    renderPty: null,
+    controlChannel: null,
+    xtermAdapter: {} as never,
+    renderPhase: "normal",
+    lastRenderWriteAt: Date.now(),
+    renderDirty: false,
+    snapshotCount: 0,
     rows: 24,
-    scrollbackLineCount: 0,
-    isAltBuffer: false,
-    title: "test-tmux",
-  })),
-  detectHighlights: vi.fn(() => []),
-  dispose: vi.fn(),
-  resize: vi.fn(),
-  markClean: vi.fn(),
-  getLastWriteAt: vi.fn(() => Date.now()),
+    cols: 80,
+    transcript: {} as never,
+    paneGeometry: null,
+    attachTarget: "tumcp_abcd1234",
+    ...overrides,
+  }
 }
 
-vi.mock("../../src/terminal/xterm-adapter.js", () => ({
-  XtermAdapter: vi.fn(() => ({ ...mockXtermAdapterInstance })),
+const mockCoreStart = vi.fn()
+const mockCoreAttach = vi.fn()
+const mockCoreSnapshot = vi.fn()
+const mockCoreWaitForText = vi.fn()
+const mockCoreWaitStable = vi.fn()
+const mockCoreType = vi.fn()
+const mockCorePress = vi.fn()
+const mockCorePaste = vi.fn()
+const mockCoreFind = vi.fn()
+const mockCoreScroll = vi.fn()
+const mockCoreMouseClick = vi.fn()
+const mockCoreMouseScroll = vi.fn()
+const mockCoreResize = vi.fn()
+const mockCoreRename = vi.fn()
+const mockCoreKill = vi.fn()
+const mockCoreExportTranscript = vi.fn()
+const mockCoreHasSession = vi.fn()
+const mockCoreListActiveSessionIds = vi.fn()
+const mockCoreListSessions = vi.fn()
+const mockCoreDispose = vi.fn()
+
+vi.mock("../../src/providers/tmux-core.js", () => ({
+  TmuxCore: vi.fn(() => ({
+    start: mockCoreStart,
+    attach: mockCoreAttach,
+    snapshot: mockCoreSnapshot,
+    waitForText: mockCoreWaitForText,
+    waitStable: mockCoreWaitStable,
+    type: mockCoreType,
+    press: mockCorePress,
+    paste: mockCorePaste,
+    find: mockCoreFind,
+    scroll: mockCoreScroll,
+    mouseClick: mockCoreMouseClick,
+    mouseScroll: mockCoreMouseScroll,
+    resize: mockCoreResize,
+    rename: mockCoreRename,
+    kill: mockCoreKill,
+    exportTranscript: mockCoreExportTranscript,
+    hasSession: mockCoreHasSession,
+    listActiveSessionIds: mockCoreListActiveSessionIds,
+    listSessions: mockCoreListSessions,
+    dispose: mockCoreDispose,
+  })),
 }))
 
 // ============================================================
-// Mock: TranscriptRecorder
+// Mock: LocalTmuxTransport
 // ============================================================
 
-vi.mock("../../src/terminal/transcript.js", () => ({
-  TranscriptRecorder: vi.fn(() => ({
-    recordOutput: vi.fn(),
-    recordInput: vi.fn(),
-    recordExit: vi.fn(),
-    recordSnapshot: vi.fn(),
-    recordResize: vi.fn(),
-    export: vi.fn(() => "transcript-content"),
-    getEventCount: vi.fn(() => 0),
-    getEvents: vi.fn(() => ({ events: [] })),
+const mockExecTmux = vi.fn()
+
+vi.mock("../../src/providers/tmux-transport.js", () => ({
+  LocalTmuxTransport: vi.fn(() => ({
+    execTmux: mockExecTmux,
+    remote: false,
+    tmuxBin: "tmux",
+    description: "local-tmux",
+    getRenderSpawnArgs: vi.fn(),
+    getControlSpawnArgs: vi.fn(),
+    execRaw: vi.fn(),
   })),
 }))
 
@@ -104,44 +140,10 @@ function createStartInput(overrides: Partial<StartInput> = {}): StartInput {
   }
 }
 
-/**
- * 创建一个 TmuxProvider 并替换其内部 execTmux 为可控 mock。
- * 直接 mock execFile 比较困难（因为 TmuxProvider 把它包在 Promise 中），
- * 所以我们换一种策略：直接用 provider 的 start 方法建立 session，
- * 然后测试后续操作。
- *
- * 为简化测试，我们通过 Object.defineProperty 替换 execTmux 私有方法。
- */
-function createProviderWithMockedExec(): {
-  provider: TmuxProvider
-  execTmuxMock: ReturnType<typeof vi.fn>
-} {
-  const execTmuxMock = vi.fn(async (_args: string[]) => ({ stdout: "tmux 3.4", stderr: "" }))
-
-  const provider = new TmuxProvider(logger)
-
-  // 替换私有 execTmux 方法；#dev 任意 TS 私有字段在 JS 运行时仍可访问
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 测试内部方法 hack
-  ;(provider as any).execTmux = execTmuxMock
-
-  // isAvailable 依赖 execTmux，置缓存为 true 避免真实 exec
-  provider.isAvailable = async () => true
-
-  return { provider, execTmuxMock }
-}
-
-/** 通过 mock provider.start 创建一个 session */
-async function startSession(
-  provider: TmuxProvider,
-  execMock: ReturnType<typeof vi.fn>,
-  input?: Partial<StartInput>,
-): Promise<string> {
-  // start 内部调用 ensureTmuxAvailable + applyEnvironment + execTmux(new-session) + clearEnvironment
-  // 我们让 execTmux 统一成功
-  execMock.mockResolvedValue({ stdout: "", stderr: "" })
-
-  const session = await provider.start(createStartInput(input))
-  return session.providerSessionId
+/** 创建 TmuxProvider 并预设 transport mock 让 isAvailable 成功 */
+function createProvider(): TmuxProvider {
+  mockExecTmux.mockResolvedValue({ stdout: "tmux 3.4", stderr: "", exitCode: 0 })
+  return new TmuxProvider(logger)
 }
 
 // ============================================================
@@ -150,6 +152,12 @@ async function startSession(
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockExecTmux.mockResolvedValue({ stdout: "tmux 3.4", stderr: "", exitCode: 0 })
+  mockCoreStart.mockResolvedValue(createMockCoreSession())
+  mockCoreAttach.mockResolvedValue(createMockCoreSession())
+  mockCoreListSessions.mockReturnValue([])
+  mockCoreHasSession.mockReturnValue(false)
+  mockCoreListActiveSessionIds.mockReturnValue([])
 })
 
 afterEach(() => {
@@ -159,40 +167,39 @@ afterEach(() => {
 describe("TmuxProvider", () => {
   // ---- isAvailable ----
 
-  it("isAvailable() 当 tmux 可用时返回 true 并缓存结果", async () => {
-    const { execTmuxMock } = createProviderWithMockedExec()
-    // 清除 isAvailable override，让它走真实路径
-    // 注意：由于真实 isAvailable 调用 execTmux，而我们已 mock 了 execTmux
-    const freshProvider = new TmuxProvider(logger)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(freshProvider as any).execTmux = execTmuxMock
-    execTmuxMock.mockResolvedValue({ stdout: "tmux 3.4", stderr: "" })
+  it("isAvailable() 当 tmux 版本满足时返回 true 并缓存结果", async () => {
+    const provider = createProvider()
 
-    const result = await freshProvider.isAvailable()
+    const result = await provider.isAvailable()
     expect(result).toBe(true)
 
-    // 第二次调用应使用缓存，不再调 execTmux
-    execTmuxMock.mockClear()
-    const result2 = await freshProvider.isAvailable()
+    // 第二次调用应使用缓存，不再调 transport.execTmux
+    mockExecTmux.mockClear()
+    const result2 = await provider.isAvailable()
     expect(result2).toBe(true)
-    expect(execTmuxMock).not.toHaveBeenCalled()
+    expect(mockExecTmux).not.toHaveBeenCalled()
+  })
+
+  it("isAvailable() 当 tmux 版本不满足时返回 false", async () => {
+    mockExecTmux.mockResolvedValue({ stdout: "tmux 2.9", stderr: "", exitCode: 0 })
+    const provider = new TmuxProvider(logger)
+
+    const result = await provider.isAvailable()
+    expect(result).toBe(false)
   })
 
   it("isAvailable() 当 tmux 不可用时返回 false", async () => {
-    const { execTmuxMock } = createProviderWithMockedExec()
-    const freshProvider = new TmuxProvider(logger)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(freshProvider as any).execTmux = execTmuxMock
-    execTmuxMock.mockRejectedValue(new Error("tmux not found"))
+    mockExecTmux.mockRejectedValue(new Error("tmux not found"))
+    const provider = new TmuxProvider(logger)
 
-    const result = await freshProvider.isAvailable()
+    const result = await provider.isAvailable()
     expect(result).toBe(false)
   })
 
   // ---- capabilities ----
 
   it("capabilities 声明 tmux 核心能力标记", () => {
-    const { provider } = createProviderWithMockedExec()
+    const provider = createProvider()
 
     expect(provider.capabilities).toEqual({
       provider: "tmux",
@@ -217,157 +224,271 @@ describe("TmuxProvider", () => {
 
   // ---- start ----
 
-  it("start() 创建 session 并调用 tmux new-session", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
-    const session = await provider.start(createStartInput())
+  it("start() 委托给 TmuxCore.start 并返回 TerminalSession", async () => {
+    const provider = createProvider()
+    const input = createStartInput()
+    const session = await provider.start(input)
 
+    expect(mockCoreStart).toHaveBeenCalledWith(input, expect.anything(), "tmux")
     expect(session.providerName).toBe("tmux")
-    expect(session.providerSessionId).toMatch(/^tumcp_/)
     expect(session.status).toBe("running")
     expect(session.command).toBe("bash")
-
-    // 验证 execTmux 被调用 new-session
-    const newSessionCall = execTmuxMock.mock.calls.find(
-      (call: string[]) => call[0]?.[0] === "new-session",
-    )
-    expect(newSessionCall).toBeDefined()
-    expect(newSessionCall![0]).toContain("-d")
-    expect(newSessionCall![0]).toContain("-s")
-    expect(newSessionCall![0]).toContain("--")
+    expect(session.capabilities).toBe(provider.capabilities)
   })
 
-  it("start() 失败时 XtermAdapter.dispose 被调用且环境清理", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
+  it("start() 有疑似 secret 环境变量时拒绝（deny 策略）", async () => {
+    const provider = new TmuxProvider(logger, { secretEnvPolicy: "deny" })
 
-    // 让 new-session 失败，同时 clearEnvironment 也失败不应该阻塞
-    execTmuxMock.mockImplementation(async (args: string[]) => {
-      if (args[0] === "new-session") {
-        throw new Error("tmux new-session failed")
-      }
-      // applyEnvironment / clearEnvironment 需要成功
-      return { stdout: "", stderr: "" }
+    await expect(provider.start(createStartInput({ env: { API_KEY: "secret" } })))
+      .rejects.toThrow(SecretEnvDeniedError)
+  })
+
+  it("start() 无 secret 环境变量时正常通过", async () => {
+    const provider = createProvider()
+
+    const session = await provider.start(createStartInput({ env: { PATH: "/usr/bin" } }))
+    expect(session.status).toBe("running")
+  })
+
+  it("start() allow 策略下允许疑似 secret 环境变量", async () => {
+    const provider = new TmuxProvider(logger, { secretEnvPolicy: "allow" })
+
+    const session = await provider.start(createStartInput({ env: { API_KEY: "secret" } }))
+    expect(session.status).toBe("running")
+  })
+
+  // ---- attach ----
+
+  it("attach() 委托给 TmuxCore.attach 并返回 TerminalSession", async () => {
+    const provider = createProvider()
+
+    const session = await provider.attach("my-session")
+    expect(mockCoreAttach).toHaveBeenCalledWith("my-session", expect.anything(), "tmux")
+    expect(session.providerName).toBe("tmux")
+  })
+
+  it("attach() 已 tracked 的 session 不再调用 core.attach", async () => {
+    const provider = createProvider()
+    // 先 start 一个 session
+    mockCoreStart.mockResolvedValue(createMockCoreSession({
+      sessionInfo: {
+        sessionId: "test-session-id",
+        providerName: "tmux",
+        providerSessionId: "tmux_test-session-id",
+        command: "bash",
+        args: [],
+        cwd: "/tmp",
+        status: "running",
+        exitCode: undefined,
+        createdAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        ttlMs: 3600000,
+      },
+      tmuxId: "my-existing",
+    }))
+    await provider.start(createStartInput())
+
+    // 用 tmuxId 查找已 tracked session
+    mockCoreListSessions.mockReturnValue([createMockCoreSession({ tmuxId: "my-existing" })])
+
+    const session = await provider.attach("my-existing")
+    expect(mockCoreAttach).not.toHaveBeenCalled()
+    expect(session.providerName).toBe("tmux")
+  })
+
+  // ---- 观测方法委托 ----
+
+  it("snapshot() 委托给 TmuxCore.snapshot", async () => {
+    const provider = createProvider()
+    const mockSnapshot = { screen: "$ ", observationTrust: "untrusted" as const }
+    mockCoreSnapshot.mockResolvedValue(mockSnapshot)
+
+    const result = await provider.snapshot("session-1", "viewport")
+    expect(mockCoreSnapshot).toHaveBeenCalledWith("session-1", "viewport")
+    expect(result).toBe(mockSnapshot)
+  })
+
+  it("waitForText() 委托给 TmuxCore.waitForText", async () => {
+    const provider = createProvider()
+    const opts = { timeoutMs: 5000 }
+    const mockSnap = { screen: "hello", observationTrust: "untrusted" as const }
+    mockCoreWaitForText.mockResolvedValue(mockSnap)
+
+    const result = await provider.waitForText("session-1", "hello", opts)
+    expect(mockCoreWaitForText).toHaveBeenCalledWith("session-1", "hello", opts)
+    expect(result).toBe(mockSnap)
+  })
+
+  it("waitStable() 委托给 TmuxCore.waitStable", async () => {
+    const provider = createProvider()
+    const opts = { timeoutMs: 5000, idleMs: 500 }
+    const mockSnap = { screen: "$ ", observationTrust: "untrusted" as const }
+    mockCoreWaitStable.mockResolvedValue(mockSnap)
+
+    const result = await provider.waitStable("session-1", opts)
+    expect(mockCoreWaitStable).toHaveBeenCalledWith("session-1", opts)
+    expect(result).toBe(mockSnap)
+  })
+
+  // ---- 输入方法委托 ----
+
+  it("type/press/paste 委托给 TmuxCore", async () => {
+    const provider = createProvider()
+
+    await provider.type("s1", "hello")
+    expect(mockCoreType).toHaveBeenCalledWith("s1", "hello")
+
+    await provider.press("s1", "ctrl+a", {} as never)
+    expect(mockCorePress).toHaveBeenCalledWith("s1", "ctrl+a", {})
+
+    await provider.paste("s1", "text", "bracketed")
+    expect(mockCorePaste).toHaveBeenCalledWith("s1", "text", "bracketed")
+  })
+
+  // ---- 搜索与滚动委托 ----
+
+  it("find/scroll 委托给 TmuxCore", async () => {
+    const provider = createProvider()
+    mockCoreFind.mockResolvedValue([])
+
+    await provider.find("s1", "pattern", true, false)
+    expect(mockCoreFind).toHaveBeenCalledWith("s1", "pattern", true, false)
+
+    await provider.scroll("s1", "up", 5)
+    expect(mockCoreScroll).toHaveBeenCalledWith("s1", "up", 5, "program-key")
+  })
+
+  // ---- 鼠标方法委托 ----
+
+  it("mouseClick/mouseScroll 委托给 TmuxCore", async () => {
+    const provider = createProvider()
+    const clickInput = { col: 1, row: 1, button: "left" as const }
+    const scrollInput = { col: 1, row: 1, direction: "up" as const }
+
+    await provider.mouseClick("s1", clickInput)
+    expect(mockCoreMouseClick).toHaveBeenCalledWith("s1", clickInput)
+
+    await provider.mouseScroll("s1", scrollInput)
+    expect(mockCoreMouseScroll).toHaveBeenCalledWith("s1", scrollInput)
+  })
+
+  // ---- 管理命令委托 ----
+
+  it("resize/rename/kill/exportTranscript 委托给 TmuxCore", async () => {
+    const provider = createProvider()
+    mockCoreExportTranscript.mockResolvedValue({ format: "text", content: "", snapshotCount: 0, eventCount: 0, redacted: true })
+
+    await provider.resize("s1", 120, 30)
+    expect(mockCoreResize).toHaveBeenCalledWith("s1", 120, 30)
+
+    await provider.rename("s1", "new-label")
+    expect(mockCoreRename).toHaveBeenCalledWith("s1", "new-label")
+
+    await provider.kill("s1")
+    expect(mockCoreKill).toHaveBeenCalledWith("s1")
+
+    await provider.exportTranscript("s1", { format: "text", redact: true })
+    expect(mockCoreExportTranscript).toHaveBeenCalledWith("s1", { format: "text", redact: true })
+  })
+
+  // ---- 查询方法委托 ----
+
+  it("hasSession/listActiveSessionIds 委托给 TmuxCore", () => {
+    const provider = createProvider()
+    mockCoreHasSession.mockReturnValue(true)
+    mockCoreListActiveSessionIds.mockReturnValue(["s1", "s2"])
+
+    expect(provider.hasSession("s1")).toBe(true)
+    expect(mockCoreHasSession).toHaveBeenCalledWith("s1")
+
+    expect(provider.listActiveSessionIds()).toEqual(["s1", "s2"])
+    expect(mockCoreListActiveSessionIds).toHaveBeenCalled()
+  })
+
+  // ---- list (含外部 session) ----
+
+  it("list() 返回 tracked sessions + 外部 tmux sessions", async () => {
+    const provider = createProvider()
+    // 先触发 isAvailable 缓存 true
+    await provider.isAvailable()
+
+    const trackedCoreSession = createMockCoreSession({
+      sessionInfo: {
+        sessionId: "tracked-id",
+        providerName: "tmux",
+        providerSessionId: "tmux_tracked-id",
+        command: "bash",
+        args: [],
+        cwd: "/tmp",
+        status: "running",
+        exitCode: undefined,
+        createdAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        ttlMs: 3600000,
+      },
+    })
+    mockCoreListSessions.mockReturnValue([trackedCoreSession])
+
+    // list-sessions 返回 tracked + 外部 session
+    mockExecTmux.mockResolvedValue({
+      stdout: "tmux_tracked-id\t1700000000\t80\t24\nexternal-session\t1700000001\t120\t30\n",
+      stderr: "",
+      exitCode: 0,
     })
 
-    await expect(provider.start(createStartInput({ env: { FOO: "bar" } }))).rejects.toThrow("tmux new-session failed")
+    const sessions = await provider.list()
 
-    // XtermAdapter 应被释放（start 失败时 dispose）
-    expect(mockXtermAdapterInstance.dispose).toHaveBeenCalled()
+    // 应包含 tracked session
+    expect(sessions.some(s => s.providerSessionId === "tmux_tracked-id")).toBe(true)
+    // 应包含外部 session（不与 tracked 重复）
+    expect(sessions.some(s => s.providerSessionId === "external-session")).toBe(true)
+    expect(sessions.some(s => s.command === "tmux-external")).toBe(true)
   })
 
-  // ---- snapshot ----
+  it("list() 当 tmux 无 session 时返回空列表", async () => {
+    const provider = createProvider()
+    // 先触发 isAvailable 缓存 true
+    await provider.isAvailable()
+    mockCoreListSessions.mockReturnValue([])
+    // list-sessions 无 session 时 tmux 返回非零 exitCode
+    mockExecTmux.mockResolvedValue({ stdout: "", stderr: "", exitCode: 1 })
 
-  it("snapshot() viewport 模式调用 capture-pane 无 -S 参数", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
-    const sessionId = await startSession(provider, execTmuxMock)
+    const sessions = await provider.list()
+    expect(sessions).toEqual([])
+  })
 
-    // 重置 mock 以便区分 snapshot 调用
-    execTmuxMock.mockReset()
-    execTmuxMock.mockImplementation(async (args: string[]) => {
-      if (args[0] === "capture-pane") return { stdout: "hello\r\nworld\r\n", stderr: "" }
-      if (args[0] === "display-message" && args.includes("#{history_size}")) return { stdout: "17\n", stderr: "" }
-      return { stdout: "test-tmux\n", stderr: "" }
+  // ---- coreSessionToTerminalSession 转换 ----
+
+  it("start() 返回的 TerminalSession 正确映射 TmuxCoreSession 字段", async () => {
+    const provider = createProvider()
+    const coreSession = createMockCoreSession({
+      sessionInfo: {
+        sessionId: "mapped-id",
+        providerName: "tmux",
+        providerSessionId: "tmux_mapped-id",
+        command: "vim",
+        args: ["file.txt"],
+        cwd: "/home",
+        label: "my-editor",
+        status: "running",
+        exitCode: undefined,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastActivityAt: "2025-01-01T00:00:01.000Z",
+        ttlMs: 7200000,
+      },
     })
+    mockCoreStart.mockResolvedValue(coreSession)
 
-    const snapshot = await provider.snapshot(sessionId, "viewport")
+    const session = await provider.start(createStartInput())
 
-    // capture-pane 应不含 -S（viewport 模式不拉 scrollback）
-    const captureCall = execTmuxMock.mock.calls.find(
-      (call: string[]) => call[0]?.[0] === "capture-pane",
-    )
-    expect(captureCall).toBeDefined()
-    expect(captureCall![0]).toContain("-e")
-    expect(captureCall![0]).not.toContain("-S")
-    expect(snapshot.scrollbackLineCount).toBe(17)
-    expect(snapshot.observationTrust).toBe("untrusted")
-    const historyCall = execTmuxMock.mock.calls.find(
-      (call: string[]) => call[0]?.[0] === "display-message" && call[0]?.includes("#{history_size}"),
-    )
-    expect(historyCall).toBeDefined()
-  })
-
-  it("snapshot() full 模式调用 capture-pane 含 -S -5000", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
-    const sessionId = await startSession(provider, execTmuxMock)
-
-    execTmuxMock.mockReset()
-    execTmuxMock.mockResolvedValue({ stdout: "full\r\ncontent\r\n", stderr: "" })
-
-    await provider.snapshot(sessionId, "full")
-
-    const captureCall = execTmuxMock.mock.calls.find(
-      (call: string[]) => call[0]?.[0] === "capture-pane",
-    )
-    expect(captureCall).toBeDefined()
-    expect(captureCall![0]).toContain("-S")
-    expect(captureCall![0]).toContain("-5000")
-  })
-
-  // ---- kill ----
-
-  it("kill() 调用 tmux kill-session + adapter.dispose", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
-    const sessionId = await startSession(provider, execTmuxMock)
-
-    execTmuxMock.mockReset()
-    execTmuxMock.mockResolvedValue({ stdout: "", stderr: "" })
-
-    await provider.kill(sessionId)
-
-    // kill-session 应被调用
-    const killCall = execTmuxMock.mock.calls.find(
-      (call: string[]) => call[0]?.[0] === "kill-session",
-    )
-    expect(killCall).toBeDefined()
-    expect(mockXtermAdapterInstance.dispose).toHaveBeenCalled()
-
-    // session 已移除
-    await expect(provider.snapshot(sessionId)).rejects.toThrow(SessionNotFoundError)
-  })
-
-  it("kill() 不存在的 session 抛 SESSION_NOT_FOUND", async () => {
-    const { provider } = createProviderWithMockedExec()
-    await expect(provider.kill("nonexistent-session")).rejects.toThrow(SessionNotFoundError)
-  })
-
-  // ---- rename ----
-
-  it("rename() 调用 tmux rename-session 并更新 session 映射", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
-    const sessionId = await startSession(provider, execTmuxMock)
-
-    execTmuxMock.mockReset()
-    execTmuxMock.mockResolvedValue({ stdout: "", stderr: "" })
-
-    const newLabel = "my-renamed-session"
-    await provider.rename(sessionId, newLabel)
-
-    // rename-session 应被调用
-    const renameCall = execTmuxMock.mock.calls.find(
-      (call: string[]) => call[0]?.[0] === "rename-session",
-    )
-    expect(renameCall).toBeDefined()
-    expect(renameCall![0]).toContain(newLabel)
-
-    // 原 sessionId 应失效
-    await expect(provider.snapshot(sessionId)).rejects.toThrow(SessionNotFoundError)
-
-    // 用新 label 可以访问
-    const snapshot = await provider.snapshot(newLabel)
-    expect(snapshot.observationTrust).toBe("untrusted")
-  })
-
-  // ---- 对已退出 session 操作拒绝 ----
-
-  it("对已 killed 的 session 调用 type 抛 SESSION_NOT_FOUND", async () => {
-    const { provider, execTmuxMock } = createProviderWithMockedExec()
-    const sessionId = await startSession(provider, execTmuxMock)
-
-    execTmuxMock.mockReset()
-    execTmuxMock.mockResolvedValue({ stdout: "", stderr: "" })
-
-    // kill 后 session 从 map 移除，后续操作抛 SESSION_NOT_FOUND
-    await provider.kill(sessionId)
-
-    await expect(provider.type(sessionId, "echo hi")).rejects.toThrow(SessionNotFoundError)
+    expect(session.sessionId).toBe("mapped-id")
+    expect(session.providerSessionId).toBe("tmux_mapped-id")
+    expect(session.command).toBe("vim")
+    expect(session.args).toEqual(["file.txt"])
+    expect(session.cwd).toBe("/home")
+    expect(session.label).toBe("my-editor")
+    expect(session.exitCode).toBeNull()
+    expect(session.ttlMs).toBe(7200000)
+    expect(session.capabilities).toBe(provider.capabilities)
   })
 })

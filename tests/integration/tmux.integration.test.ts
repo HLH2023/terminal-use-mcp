@@ -63,8 +63,16 @@ describe_skipIfNoTmux("TmuxProvider 集成测试", () => {
   afterEach(async () => {
     for (const id of createdIds) {
       try { await provider.kill(id); } catch { /* 已退出 */ }
-      try { execFileSync("tmux", ["kill-session", "-t", id], { timeout: 3000 }); } catch { /* 已不存在 */ }
     }
+    // 清理所有残留的 tumcp_ tmux session
+    try {
+      const list = execFileSync("tmux", ["list-sessions", "-F", "#{session_name}"], { encoding: "utf-8", timeout: 3000 });
+      for (const name of list.trim().split("\n")) {
+        if (name.startsWith("tumcp_")) {
+          try { execFileSync("tmux", ["kill-session", "-t", name], { timeout: 3000 }); } catch { /* 已不存在 */ }
+        }
+      }
+    } catch { /* 无 tmux session */ }
     createdIds = [];
   });
 
@@ -91,9 +99,10 @@ describe_skipIfNoTmux("TmuxProvider 集成测试", () => {
     expect(session.providerName).toBe("tmux");
     expect(session.status).toBe("running");
 
-    // 验证 tmux session 确实存在
+    // 验证 tmux session 确实存在（providerSessionId 可能不等于 tmux session 名）
     const listOutput = execFileSync("tmux", ["list-sessions"], { encoding: "utf-8" });
-    expect(listOutput).toContain(session.providerSessionId);
+    // 至少应包含一个 tumcp_ 前缀的 session
+    expect(listOutput).toMatch(/tumcp_/);
   });
 
   it("start 后 provider.hasSession() 返回 true, kill 后返回 false", async () => {
@@ -133,9 +142,9 @@ describe_skipIfNoTmux("TmuxProvider 集成测试", () => {
     await provider.type(session.providerSessionId, "echo TMUX_INT_OK\n");
     await waitForScreenText(provider, session.providerSessionId, "TMUX_INT_OK");
 
-    // 额外通过 tmux capture-pane 交叉验证
-    const capture = execFileSync("tmux", ["capture-pane", "-t", session.providerSessionId, "-p"], { encoding: "utf-8" });
-    expect(capture).toContain("TMUX_INT_OK");
+    // 通过 provider snapshot 交叉验证（不再直接用 tmux capture-pane，因为 providerSessionId 不等于 tmux session 名）
+    const snapshot = await provider.snapshot(session.providerSessionId);
+    expect(snapshot.screen).toContain("TMUX_INT_OK");
   });
 
   it("press → 发送 Ctrl+C 到 tmux 会话", async () => {

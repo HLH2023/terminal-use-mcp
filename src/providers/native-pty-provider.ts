@@ -15,6 +15,7 @@ import type {
   ProviderCapabilities,
   ProviderName,
   ScrollDirection,
+  ScrollMode,
   StartInput,
   TerminalProvider,
   TerminalSession,
@@ -433,7 +434,7 @@ export class NativePtyProvider implements TerminalProvider {
     return results
   }
 
-  async scroll(sessionId: string, direction: ScrollDirection, lines: number): Promise<void> {
+  async scroll(sessionId: string, direction: ScrollDirection, lines: number, _mode?: ScrollMode): Promise<void> {
     const keyExpr = direction === "up" ? "pageup" : "pagedown"
     const parsed = parseKeyExpr(keyExpr)
     const count = Math.max(0, Math.floor(lines))

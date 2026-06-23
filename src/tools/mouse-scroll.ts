@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import type { Logger } from "../logger.js"
 import type { MouseScrollDirection } from "../terminal/mouse.js"
+import type { ScrollMode } from "../providers/provider.js"
 import type { ProviderExecutor } from "./tool-helpers.js"
 import { errorToToolResult, okToolResult } from "./tool-helpers.js"
 
@@ -34,16 +35,19 @@ export function registerMouseScrollTool(server: McpServer, executor: ProviderExe
         shift: z.boolean().describe("Shift key held (fast scroll in some apps)").default(false),
         alt: z.boolean().describe("Alt key held").default(false),
         ctrl: z.boolean().describe("Ctrl key held").default(false),
+        mode: z.enum(["program-mouse", "tmux-copy", "program-key"]).optional().describe("Scroll mode: program-mouse (default, SGR mouse sequence), tmux-copy (copy-mode + scroll-up/scroll-down), program-key (PageUp/PageDown keys)").default("program-mouse"),
       },
     },
     async (input) => {
       try {
         const direction: MouseScrollDirection = input.direction
+        const mode: ScrollMode = input.mode ?? "program-mouse"
         const lines = input.lines ?? 3
         await executor.executeMouseScroll(input.sessionId, {
           col: input.col,
           row: input.row,
           direction,
+          mode,
           shift: input.shift ?? false,
           alt: input.alt ?? false,
           ctrl: input.ctrl ?? false,

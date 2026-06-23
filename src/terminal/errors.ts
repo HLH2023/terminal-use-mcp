@@ -35,6 +35,14 @@ export type TerminalUseErrorCode =
   | "PROXY_JUMP_UNSUPPORTED"
   | "SECRET_ENV_DENIED"
   | "SESSION_AMBIGUOUS"
+  // tmux 三通道架构（Render Channel + Control Channel + CLI Fallback）
+  | "TMUX_CONTROL_ERROR"          // tmux -C 控制通道协议错误（%error 响应、连接断开等）
+  | "TMUX_COMMAND_DENIED"         // tmux 管理命令被鉴权拒绝（run-shell/if-shell 等禁止命令）
+  | "TMUX_COMMAND_PARSE_ERROR"    // tmux 命令 DSL 解析失败
+  | "TMUX_RESHAPE_TIMEOUT"        // reshape 等待超时（render quarantine）
+  | "PANE_CROP_UNAVAILABLE"       // pane 投影裁剪不可用（geometry 无法匹配）
+  | "TMUX_SESSION_DETACHED"       // tmux session 已被 detach 或销毁
+  | "TMUX_REATTACH_FAILED"        // 重新 attach render channel 失败
 
 export type ErrorEnvelope = {
   ok: false
@@ -301,5 +309,56 @@ export class SessionAmbiguousError extends TerminalUseError {
       hint: "Use the exact session ID. Run terminal.list to see all active sessions.",
       details: { sessionId, candidates },
     })
+  }
+}
+
+// tmux 三通道架构错误 — Render Channel + Control Channel + CLI Fallback
+
+/** tmux -C 控制通道协议错误（%error 响应、连接断开等） */
+export class TmuxControlError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "TMUX_CONTROL_ERROR", message, retryable: false, ...opts })
+  }
+}
+
+/** tmux 管理命令被鉴权拒绝（run-shell/if-shell 等禁止命令） */
+export class TmuxCommandDeniedError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "TMUX_COMMAND_DENIED", message, retryable: false, ...opts })
+  }
+}
+
+/** tmux 命令 DSL 解析失败 */
+export class TmuxCommandParseError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "TMUX_COMMAND_PARSE_ERROR", message, retryable: false, ...opts })
+  }
+}
+
+/** reshape 等待超时（render quarantine） */
+export class TmuxReshapeTimeoutError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "TMUX_RESHAPE_TIMEOUT", message, retryable: true, ...opts })
+  }
+}
+
+/** pane 投影裁剪不可用（geometry 无法匹配） */
+export class PaneCropUnavailableError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "PANE_CROP_UNAVAILABLE", message, retryable: true, ...opts })
+  }
+}
+
+/** tmux session 已被 detach 或销毁 */
+export class TmuxSessionDetachedError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "TMUX_SESSION_DETACHED", message, retryable: false, ...opts })
+  }
+}
+
+/** 重新 attach render channel 失败 */
+export class TmuxReattachFailedError extends TerminalUseError {
+  constructor(message: string, opts?: { provider?: string; sessionId?: string; details?: unknown }) {
+    super({ code: "TMUX_REATTACH_FAILED", message, retryable: false, ...opts })
   }
 }

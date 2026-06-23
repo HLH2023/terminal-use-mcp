@@ -42,10 +42,21 @@ export type TerminalSnapshot = {
   /**
    * wait_stable 超时时的软失败标记。
    *
-   * 终端输出持续刷新时（如 curses/Ink TUI 轮询渲染）可能永远无法满足“稳定”判定；
+   * 终端输出持续刷新时（如 curses/Ink TUI 轮询渲染）可能永远无法满足"稳定"判定；
    * 此时返回当前可观察屏幕，并用该字段提示调用方：本快照可用，但未确认稳定。
    */
   timedOut?: boolean
+  /**
+   * 渲染阶段状态（仅 tmux/ssh-tmux provider 提供）。
+   *
+   * - `"normal"` — 渲染通道正常，快照内容可信
+   * - `"reshaping"` — tmux layout 变更中，快照可能不完整
+   * - `"reattaching"` — 渲染通道重连中，快照可能为空或过时
+   * - `"recovering"` — 渲染通道恢复中，快照可能不完整
+   *
+   * 其他 provider 不设置此字段（undefined），调用方应视为 normal。
+   */
+  renderStatus?: "normal" | "reshaping" | "reattaching" | "recovering"
   timestamp: string
   observationTrust: "untrusted"
 }

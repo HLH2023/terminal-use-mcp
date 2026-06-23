@@ -69,6 +69,15 @@ export type AuditInputSummary = {
   mouseRow?: number
   mouseDirection?: string
   mouseButton?: string
+  /** For tmux_command: parsed kind and dry-run flag */
+  tmuxCommandKind?: string
+  tmuxCommandDryRun?: boolean
+  /** tmux 命令 target（如 %3, @2, session-name） */
+  tmuxCommandTarget?: string
+  /** tmux 命令是否破坏性（kill 等） */
+  tmuxCommandDestructive?: boolean
+  /** 编译后的 tmux 命令（如 "kill-pane -t %3"，已脱敏） */
+  compiledCommand?: string
 }
 
 /** Audit logger interface */
@@ -146,6 +155,7 @@ export function auditDeny(
     target?: AuditLogEntry["target"]
     command?: string
     cwd?: string
+    input?: AuditInputSummary
   },
 ): Omit<AuditLogEntry, "timestamp" | "redacted"> {
   return { tool, decision: "deny", reason, ...opts }
@@ -162,6 +172,7 @@ export function auditError(
     target?: AuditLogEntry["target"]
     command?: string
     cwd?: string
+    input?: AuditInputSummary
   },
 ): Omit<AuditLogEntry, "timestamp" | "redacted"> {
   return { tool, decision: "error", reason, ...opts }

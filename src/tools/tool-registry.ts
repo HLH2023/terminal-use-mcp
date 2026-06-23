@@ -27,8 +27,8 @@ export const ALL_TOOL_NAMES = [
   "terminal.send_signal",
   // Remote (3)
   "terminal.targets", "terminal.target_info", "terminal.verify_target",
-  // Tmux (2)
-  "terminal.tmux_list", "terminal.tmux_kill",
+  // Tmux (3)
+  "terminal.tmux_list", "terminal.tmux_kill", "terminal.tmux_command",
 ] as const
 
 /** Tool → Category 映射 */
@@ -48,6 +48,7 @@ export const TOOL_CATEGORIES: Record<string, ToolCategory> = {
   "terminal.targets": "remote", "terminal.target_info": "remote",
   "terminal.verify_target": "remote",
   "terminal.tmux_list": "tmux", "terminal.tmux_kill": "tmux",
+  "terminal.tmux_command": "tmux",
 }
 
 /** Health tool 始终注册，不可禁用 */
@@ -80,7 +81,7 @@ export const REMOTE_TUI_TOOLS = new Set([
 export const PERSISTENT_TUI_TOOLS = new Set([
   ...LOCAL_TUI_TOOLS,
   "terminal.attach", "terminal.rename", "terminal.cleanup",
-  "terminal.tmux_list", "terminal.tmux_kill",
+  "terminal.tmux_list", "terminal.tmux_kill", "terminal.tmux_command",
 ])
 
 /** full profile — 全部 tools */

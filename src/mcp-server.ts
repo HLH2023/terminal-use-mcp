@@ -15,7 +15,6 @@ import type { ProviderName, TerminalProvider } from "./providers/provider.js"
 import type { SshHostProfile } from "./targets/target-types.js"
 import { ProviderExecutor } from "./tools/tool-helpers.js"
 import { resolveEnabledTools } from "./tools/tool-registry.js"
-import type { ToolRegistryResult } from "./tools/tool-registry.js"
 import { VERSION } from "./version.js"
 
 // ── 22 Session tools ───────────────────────────────────────────
@@ -51,9 +50,10 @@ import { registerTargetsTool } from "./tools/targets.js"
 import { registerTargetInfoTool } from "./tools/target-info.js"
 import { registerVerifyTargetTool } from "./tools/verify-target.js"
 
-// ── 2 Tmux management tools ──────────────────────────────────
+// ── 3 Tmux management tools ──────────────────────────────────
 import { registerTmuxListTool } from "./tools/tmux-list.js"
 import { registerTmuxKillTool } from "./tools/tmux-kill.js"
+import { registerTmuxCommandTool } from "./tools/tmux-command.js"
 
 // ── 2 resources ───────────────────────────────────────────────
 import { registerSessionsResource } from "./resources/sessions-resource.js"
@@ -161,9 +161,10 @@ export function createMcpServer(
   registerIf("terminal.target_info", () => registerTargetInfoTool(server, hostsConfig, logger))
   registerIf("terminal.verify_target", () => registerVerifyTargetTool(server, sm, hostsConfig, logger))
 
-  // ── Tmux management (2) ──
+  // ── Tmux management (3) ──
   registerIf("terminal.tmux_list", () => registerTmuxListTool(server, executor, logger, hostsConfig))
   registerIf("terminal.tmux_kill", () => registerTmuxKillTool(server, executor, logger, hostsConfig))
+  registerIf("terminal.tmux_command", () => registerTmuxCommandTool(server, sm, config, auditLogger))
 
   // ── Resources (2) ──
   registerSessionsResource(server, sm)

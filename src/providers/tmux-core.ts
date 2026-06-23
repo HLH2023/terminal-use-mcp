@@ -17,9 +17,10 @@
 
 import { randomBytes } from "node:crypto"
 
-import type { TmuxTransport, RenderChannelOpts, RenderSpawnResult } from "./tmux-transport.js"
+import type { TmuxTransport, RenderChannelOpts, RenderSpawnResult, ControlSpawnResult } from "./tmux-transport.js"
+import { hasInProcessControl } from "./tmux-transport.js"
 import { TmuxControlChannel } from "./tmux-control-channel.js"
-import type { TmuxControlNotification, TmuxControlResponse } from "./tmux-control-channel.js"
+import type { TmuxControlChannelLike, TmuxControlNotification, TmuxControlResponse } from "./tmux-control-channel.js"
 import type { Logger } from "../logger.js"
 import type { ProviderName, StartInput, MouseClickInput, MouseScrollInput, ScrollDirection, WaitOptions, WaitStableOptions, ExportOptions, TranscriptExport, FindResult } from "./provider.js"
 import { detectRiskSignals } from "../terminal/confirm-detection.js"
@@ -55,10 +56,23 @@ import { validateRegexSafety, createSafeRegex, isCommandSafeArgv } from "../term
 import { XtermAdapter } from "../terminal/xterm-adapter.js"
 import { safeCleanup } from "../terminal/safe-cleanup.js"
 import { parseTmuxCommand } from "../terminal/tmux-command-parser.js"
-import type { TmuxCommandParseResult } from "../terminal/tmux-command-parser.js"
+import type { TmuxCommandParseResult, TmuxTarget, TmuxAttachTarget, TmuxCommandAst } from "../terminal/tmux-command-parser.js"
 import { authorizeAndCompile } from "../terminal/tmux-command-switch.js"
 import type { AuthorizationResult, AuthorizationContext } from "../terminal/tmux-command-switch.js"
+import { cropToPane, formatTmuxTargetFromAst, parsePaneGeometryLine, detectPollutionHeuristics, type PollutionType } from "../terminal/tmux-core-utils.js"
 import type { TerminalUseConfig } from "../config.js"
+
+// ─── 辅助函数 ──────────────────────────────────────────────────────────────────
+
+/** 将 TmuxTarget 或 TmuxAttachTarget 格式化为字符串用于 audit */
+function formatTmuxTarget(target: TmuxTarget | TmuxAttachTarget): string {
+  if ("id" in target) return target.id
+  if ("name" in target) return target.name
+  if ("paneId" in target) return target.paneId
+  // TmuxAttachTarget window: "session:window"
+  if ("session" in target && "window" in target) return `${target.session}:${target.window}`
+  return String(target)
+}
 
 // ─── 常量 ─────────────────────────────────────────────────────────────────────
 
@@ -75,6 +89,15 @@ const WAIT_RENDER_AFTER_INPUT_MS = 200
 
 /** 初始渲染稳定等待超时（ms） */
 const INITIAL_RENDER_STABLE_MS = 3_000
+
+/** reshape 阶段等待渲染与几何收敛的超时（ms） */
+const RESHAPE_STABLE_TIMEOUT_MS = 5_000
+
+/** reshape 阶段判定 render channel idle 的最小空闲时间（ms） */
+const RESHAPE_RENDER_IDLE_MS = 200
+
+/** reshape 阶段轮询间隔（ms） */
+const RESHAPE_POLL_MS = 50
 
 // ─── node-pty 类型 ────────────────────────────────────────────────────────────
 
@@ -133,6 +156,19 @@ export type TmuxCommandResult = {
   needsTreeRefresh: boolean
   /** 需要 reattach */
   needsReattach: boolean
+  /** tmux 命令 target（如 %3, @2, session-name） */
+  tmuxCommandTarget?: string
+  /** tmux 命令是否破坏性（kill 等） */
+  tmuxCommandDestructive?: boolean
+  /** 编译后的 tmux 命令（如 "kill-pane -t %3"，已脱敏） */
+  compiledCommand?: string
+}
+
+/** tmux 树查询结果（sessions / windows / panes 的扁平完整视图） */
+export type TmuxTreeResult = {
+  sessions: Array<{ id: string; name: string; created: string }>
+  windows: Array<{ id: string; sessionName: string; index: number; name: string; width: number; height: number }>
+  panes: Array<{ id: string; sessionName: string; windowIndex: number; index: number; title: string; left: number; top: number; width: number; height: number; active: boolean }>
 }
 
 // ─── TmuxCoreSession 类型 ─────────────────────────────────────────────────────
@@ -169,7 +205,7 @@ export type TmuxCoreSession = {
   /** Render Channel: node-pty 进程 */
   renderPty: MinimalPty | null
   /** Control Channel: tmux -C 实例 */
-  controlChannel: TmuxControlChannel | null
+  controlChannel: TmuxControlChannelLike | null
   // ─── 渲染状态 ───
   /** XtermAdapter 用于解析 render channel 输出 */
   xtermAdapter: XtermAdapter
@@ -189,10 +225,12 @@ export type TmuxCoreSession = {
   cols: number
   // ─── transcript ───
   transcript: TranscriptRecorder
-  /** pane geometry（从 control channel list-panes 获取） */
-  paneGeometry: PaneGeometry | null
+  /** pane geometry 列表（从 control channel list-panes 获取） */
+  paneGeometries: PaneGeometry[]
   /** 当前 attach target（如 "tumcp_abcdef" 或 "tumcp_abcdef:0.%0"） */
   attachTarget: string
+  /** 上一次输入是否无视觉变化 */
+  lastInputNoVisualChange?: boolean
 }
 
 // ─── TmuxCore 类 ──────────────────────────────────────────────────────────────
@@ -242,11 +280,12 @@ export class TmuxCore {
    * @returns 创建的 TmuxCoreSession
    */
   async start(input: StartInput, transport: TmuxTransport, providerName: ProviderName): Promise<TmuxCoreSession> {
-    const ptyModule = this.ensureNodePty()
+    const useInProcessControl = hasInProcessControl(transport)
+    const ptyModule = useInProcessControl ? null : await this.ensureNodePty()
 
     const sessionId = generateSessionId()
-    const tmuxId = this.createTmuxSessionName()
-    const providerSessionId = `${providerName === "tmux" ? "tmux" : "stmux"}_${sessionId}`
+    const tmuxId = providerName === "ssh-tmux" ? this.createRemoteTmuxSessionName() : this.createTmuxSessionName()
+    const providerSessionId = providerName === "ssh-tmux" ? tmuxId : `${providerName === "tmux" ? "tmux" : "stmux"}_${sessionId}`
     const createdAt = new Date().toISOString()
     const xtermAdapter = new XtermAdapter(input.cols, input.rows)
     const transcript = new TranscriptRecorder(sessionId)
@@ -257,6 +296,12 @@ export class TmuxCore {
       "-x", String(input.cols), "-y", String(input.rows),
       "-c", input.cwd,
     ]
+    // 传入环境变量（-e KEY=VALUE 必须在 -- 之前）
+    if (input.env !== undefined) {
+      for (const [key, value] of Object.entries(input.env)) {
+        newSessionArgs.push("-e", `${key}=${value}`)
+      }
+    }
     if (input.command.length > 0) {
       newSessionArgs.push("--", input.command, ...input.args)
     }
@@ -275,22 +320,25 @@ export class TmuxCore {
     // Step 3: 设置稳定尺寸策略（仅对 agent-owned session）
     await transport.execTmux(["set-option", "-t", tmuxId, "window-size", "manual"])
 
-    // Step 4: 启动 control channel
-    const controlChannel = new TmuxControlChannel()
-    const controlSpawnArgs = transport.getControlSpawnArgs(tmuxId)
-    await controlChannel.start(controlSpawnArgs)
+    // Step 3b: 设置 default-size 和关闭 aggressive-resize（仅 agent-owned session）
+    await transport.execTmux(["set-option", "-t", tmuxId, "default-size", `${input.cols}x${input.rows}`])
+    await transport.execTmux(["set-option", "-t", tmuxId, "aggressive-resize", "off"])
 
-    // Step 5: 订阅 control channel 事件（在 session 创建后绑定）
-
-    // Step 6: 启动 render channel
+    // Step 4: 启动 render channel（必须在 control channel 之前！）
+    // tmux 3.4+ 的 control mode client (-C) 不会被计为"真实 attached client"，
+    // 如果 session 没有其他真实 client，tmux 会立即 detach 控制客户端并 %exit。
+    // 先启动 render channel（node-pty + tmux attach）确保 session 有真实 client，
+    // 再启动 control channel 才能稳定运行。
     const renderOpts: RenderChannelOpts = {
       attachTarget: tmuxId,
       cols: input.cols,
       rows: input.rows,
     }
-    const renderSpawnArgs = transport.getRenderSpawnArgs(renderOpts)
-    const renderPty = this.spawnRenderPty(renderSpawnArgs, ptyModule)
+    const renderPty = ptyModule === null ? null : this.spawnRenderPty(transport.getRenderSpawnArgs(renderOpts), ptyModule)
 
+    // Step 5: 创建 session 对象（controlChannel 暂为 null）
+    // 必须在绑定 render channel 事件回调之前创建 session，
+    // 因为回调需要 session 引用来写入 xtermAdapter 等。
     const session: TmuxCoreSession = {
       sessionInfo: {
         sessionId,
@@ -308,7 +356,7 @@ export class TmuxCore {
       tmuxId,
       transport,
       renderPty,
-      controlChannel,
+      controlChannel: null,
       xtermAdapter,
       renderPhase: "normal",
       lastRenderWriteAt: Date.now(),
@@ -317,26 +365,40 @@ export class TmuxCore {
       rows: input.rows,
       cols: input.cols,
       transcript,
-      paneGeometry: null,
+      paneGeometries: [],
       attachTarget: tmuxId,
     }
 
-    // Step 7: 连接 render channel onData → XtermAdapter
-    const dataDisposable = renderPty.onData((data) => {
-      this.handleRenderData(session, data)
-    })
-    const exitDisposable = renderPty.onExit((event) => {
-      this.handleRenderExit(session, event.exitCode)
-    })
-    this.disposables.push(dataDisposable, exitDisposable)
+    // Step 6: 立即绑定 render channel onData/onExit 回调
+    // 关键时序：tmux attach 成功后会立即发出初始屏幕渲染数据（ANSI escape 序列）。
+    // 如果在 controlChannel.start() 之后才绑定 onData，这些初始数据会在 await 期间
+    // 被 node-pty emit 但没有监听器接收，导致 XtermAdapter 永远收不到初始屏幕内容，
+    // 后续 snapshot() 返回空屏幕，tmux 因无"真实 client"而 %exit control channel。
+    if (renderPty !== null) {
+      const dataDisposable = renderPty.onData((data) => {
+        if (session.renderPty !== renderPty) return
+        this.handleRenderData(session, data)
+      })
+      const exitDisposable = renderPty.onExit((event) => {
+        if (session.renderPty !== renderPty) return
+        this.handleRenderExit(session, event.exitCode)
+      })
+      this.disposables.push(dataDisposable, exitDisposable)
+    }
 
-    // Step 5 续: 订阅 control channel 事件
+    // Step 7: 启动 control channel（此时 session 已有 render channel 作为真实 client）
+    const controlChannel = this.createControlChannel(transport)
+    const controlSpawnArgs = useInProcessControl ? this.emptyControlSpawnArgs() : transport.getControlSpawnArgs(tmuxId)
+    await controlChannel.start(controlSpawnArgs)
+    session.controlChannel = controlChannel
+
+    // Step 8: 订阅 control channel 事件
     const notificationHandler = (notification: TmuxControlNotification) => {
       this.handleControlNotification(session, notification)
     }
     controlChannel.onNotification(notificationHandler)
 
-    // Step 8: 刷新 pane geometry
+    // Step 9: 刷新 pane geometry
     await this.refreshPaneGeometry(session)
 
     session.sessionInfo.status = "running"
@@ -372,7 +434,8 @@ export class TmuxCore {
    * @returns 附加的 TmuxCoreSession
    */
   async attach(sessionIdOrName: string, transport: TmuxTransport, providerName: ProviderName): Promise<TmuxCoreSession> {
-    const ptyModule = this.ensureNodePty()
+    const useInProcessControl = hasInProcessControl(transport)
+    const ptyModule = useInProcessControl ? null : await this.ensureNodePty()
 
     const sessionId = generateSessionId()
     const providerSessionId = `${providerName === "tmux" ? "tmux" : "stmux"}_${sessionId}`
@@ -390,20 +453,15 @@ export class TmuxCore {
     // Step 2: 启用鼠标模式
     await transport.execTmux(["set-option", "-t", sessionIdOrName, "mouse", "on"])
 
-    // Step 3: 启动 control channel
-    const controlChannel = new TmuxControlChannel()
-    const controlSpawnArgs = transport.getControlSpawnArgs(sessionIdOrName)
-    await controlChannel.start(controlSpawnArgs)
-
-    // Step 4: 启动 render channel
+    // Step 3: 启动 render channel（必须在 control channel 之前，同 start()）
     const renderOpts: RenderChannelOpts = {
       attachTarget: sessionIdOrName,
       cols,
       rows,
     }
-    const renderSpawnArgs = transport.getRenderSpawnArgs(renderOpts)
-    const renderPty = this.spawnRenderPty(renderSpawnArgs, ptyModule)
+    const renderPty = ptyModule === null ? null : this.spawnRenderPty(transport.getRenderSpawnArgs(renderOpts), ptyModule)
 
+    // Step 4: 创建 session 对象（controlChannel 暂为 null）
     const session: TmuxCoreSession = {
       sessionInfo: {
         sessionId,
@@ -420,7 +478,7 @@ export class TmuxCore {
       tmuxId: sessionIdOrName,
       transport,
       renderPty,
-      controlChannel,
+      controlChannel: null,
       xtermAdapter,
       renderPhase: "normal",
       lastRenderWriteAt: Date.now(),
@@ -429,18 +487,28 @@ export class TmuxCore {
       rows,
       cols,
       transcript,
-      paneGeometry: null,
+      paneGeometries: [],
       attachTarget: sessionIdOrName,
     }
 
-    // Step 5: 连接 render channel onData → XtermAdapter
-    const dataDisposable = renderPty.onData((data) => {
-      this.handleRenderData(session, data)
-    })
-    const exitDisposable = renderPty.onExit((event) => {
-      this.handleRenderExit(session, event.exitCode)
-    })
-    this.disposables.push(dataDisposable, exitDisposable)
+    // Step 5: 立即绑定 render channel onData/onExit（同 start() 时序要求）
+    if (renderPty !== null) {
+      const dataDisposable = renderPty.onData((data) => {
+        if (session.renderPty !== renderPty) return
+        this.handleRenderData(session, data)
+      })
+      const exitDisposable = renderPty.onExit((event) => {
+        if (session.renderPty !== renderPty) return
+        this.handleRenderExit(session, event.exitCode)
+      })
+      this.disposables.push(dataDisposable, exitDisposable)
+    }
+
+    // Step 6: 启动 control channel
+    const controlChannel = this.createControlChannel(transport)
+    const controlSpawnArgs = useInProcessControl ? this.emptyControlSpawnArgs() : transport.getControlSpawnArgs(sessionIdOrName)
+    await controlChannel.start(controlSpawnArgs)
+    session.controlChannel = controlChannel
 
     // 订阅 control channel 事件
     const notificationHandler = (notification: TmuxControlNotification) => {
@@ -448,7 +516,7 @@ export class TmuxCore {
     }
     controlChannel.onNotification(notificationHandler)
 
-    // Step 6: 刷新 pane geometry
+    // Step 7: 刷新 pane geometry
     await this.refreshPaneGeometry(session)
 
     session.sessionInfo.status = "running"
@@ -483,8 +551,21 @@ export class TmuxCore {
   async snapshot(sessionId: string, mode: TerminalSnapshotMode = "viewport", view: TmuxSnapshotView = "pane"): Promise<TerminalSnapshot> {
     const session = this.getLiveSession(sessionId)
 
-    // 如果 renderPhase != normal，等待 stable（简化版）
-    if (session.renderPhase !== "normal") {
+    if (session.renderPty === null && hasInProcessControl(session.transport)) {
+      return this.snapshotViaExecTmux(session, mode)
+    }
+
+    // 记录 snapshot 入口时的渲染阶段，用于 renderStatus 字段
+    const entryRenderPhase = session.renderPhase
+
+    if (session.renderPhase === "reshaping") {
+      const stabilized = await this.waitForReshapeStable(session, RESHAPE_STABLE_TIMEOUT_MS)
+      if (stabilized) {
+        session.renderPhase = "normal"
+      } else {
+        await this.recoverRenderChannel(session)
+      }
+    } else if (session.renderPhase !== "normal") {
       await this.waitForRenderPhaseNormal(session, INITIAL_RENDER_STABLE_MS)
     }
 
@@ -494,10 +575,21 @@ export class TmuxCore {
     const screenHash = hashScreen(screenText)
     const changed = session.renderDirty || session.lastScreenHash !== screenHash
 
-    // pane view 裁剪（后续 Phase 完善，当前返回完整 screen）
-    const effectiveScreenText = view === "pane" && session.paneGeometry !== null
-      ? this.cropToPane(screenText, session.paneGeometry, screen.cols)
-      : screenText
+    const activeGeometry = this.getActivePaneGeometry(session)
+    let effectiveScreenText: string
+    if (view === "pane") {
+      if (activeGeometry === null) {
+        // geometry 不可用时降级到 client view，而非中断操作
+        this.logger.warn("tmux-core pane geometry unavailable, falling back to client view", {
+          sessionId: session.sessionInfo.sessionId,
+        })
+        effectiveScreenText = screenText
+      } else {
+        effectiveScreenText = cropToPane(screenText, activeGeometry, screen.cols)
+      }
+    } else {
+      effectiveScreenText = screenText
+    }
 
     const riskSignals = detectRiskSignals(effectiveScreenText)
 
@@ -515,10 +607,22 @@ export class TmuxCore {
       isFullscreen: screen.isAltBuffer,
       highlights,
       riskSignals,
+      renderStatus: entryRenderPhase,
     })
 
     session.lastScreenHash = screenHash
     session.snapshotCount += 1
+
+    // 污染检测 heuristic（仅每 5 次 snapshot 检查一次，避免性能开销）
+    if (session.snapshotCount % 5 === 0 && this.detectRenderPollution(session).length > 0) {
+      this.logger.warn("tmux-core render pollution detected; triggering recovery", {
+        sessionId: session.sessionInfo.sessionId,
+      })
+      await this.recoverRenderChannel(session)
+      // recovery 后重新读取 screen
+      return this.snapshot(sessionId, mode, view)
+    }
+
     session.renderDirty = false
     session.sessionInfo.lastActivityAt = snapshotResult.timestamp
     session.xtermAdapter.markClean()
@@ -584,6 +688,15 @@ export class TmuxCore {
 
     while (true) {
       const session = this.getLiveSession(sessionId)
+      if (session.renderPhase === "reshaping") {
+        const remainingMs = Math.max(0, options.timeoutMs - (Date.now() - startedAt))
+        const stabilized = await this.waitForReshapeStable(session, Math.min(remainingMs, RESHAPE_STABLE_TIMEOUT_MS))
+        if (stabilized) {
+          session.renderPhase = "normal"
+        } else {
+          await this.recoverRenderChannel(session)
+        }
+      }
       const snapshotResult = await this.snapshot(sessionId)
       const now = Date.now()
       const currentState: ScreenState = {
@@ -626,7 +739,7 @@ export class TmuxCore {
     const session = this.getLiveSession(sessionId)
     this.assertControlChannelConnected(session)
 
-    await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", text])
+    await this.sendLiteralText(session, text)
     session.transcript.recordInput(text)
     session.sessionInfo.lastActivityAt = new Date().toISOString()
     await this.waitRenderAfterInput(session)
@@ -665,10 +778,8 @@ export class TmuxCore {
     const effectiveMode = mode ?? "bracketed"
 
     if (effectiveMode === "bracketed") {
-      // tmux 支持 set-buffer + paste-buffer 实现 bracketed paste
-      // 简化版：直接 send-keys -l 发送 bracketed 序列
       const payload = `\x1b[200~${text}\x1b[201~`
-      await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", payload])
+      await this.sendLiteralText(session, payload)
       session.transcript.recordInput("<paste:bracketed>")
       session.sessionInfo.lastActivityAt = new Date().toISOString()
       await this.waitRenderAfterInput(session)
@@ -678,7 +789,10 @@ export class TmuxCore {
     if (effectiveMode === "line-by-line") {
       const lines = text.split(/\r?\n/)
       for (const line of lines) {
-        await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", `${line}\r`])
+        if (line.length > 0) {
+          await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", line])
+        }
+        await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "Enter"])
         await delay(LINE_BY_LINE_PASTE_DELAY_MS)
       }
       session.transcript.recordInput("<paste:line-by-line>")
@@ -687,7 +801,7 @@ export class TmuxCore {
     }
 
     // raw
-    await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", text])
+    await this.sendLiteralText(session, text)
     session.transcript.recordInput("<paste:raw>")
     session.sessionInfo.lastActivityAt = new Date().toISOString()
     await this.waitRenderAfterInput(session)
@@ -730,17 +844,33 @@ export class TmuxCore {
     this.assertControlChannelConnected(session)
     validateMouseCoords(input.col, input.row, session.cols, session.rows)
 
-    const event: MouseScrollEvent = {
-      col: input.col,
-      row: input.row,
-      direction: input.direction,
-      shift: input.shift,
-      alt: input.alt,
-      ctrl: input.ctrl,
+    const scrollMode = input.mode ?? "program-mouse"
+    const count = input.direction === "up" ? -3 : 3
+
+    if (scrollMode === "tmux-copy") {
+      for (let index = 0; index < Math.abs(count); index += 1) {
+        const scrollCommand = input.direction === "up" ? "scroll-up" : "scroll-down"
+        await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-X", scrollCommand])
+      }
+    } else if (scrollMode === "program-key") {
+      const tmuxKey = input.direction === "up" ? "PageUp" : "PageDown"
+      for (let index = 0; index < Math.abs(count); index += 1) {
+        await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, tmuxKey])
+      }
+    } else {
+      const event: MouseScrollEvent = {
+        col: input.col,
+        row: input.row,
+        direction: input.direction,
+        shift: input.shift,
+        alt: input.alt,
+        ctrl: input.ctrl,
+      }
+      const sequence = mouseScrollToSgrSequence(event)
+      await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", sequence])
     }
-    const sequence = mouseScrollToSgrSequence(event)
-    await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", sequence])
-    session.transcript.recordInput(`<mouse:scroll:${input.direction}@${input.col},${input.row}>`)
+
+    session.transcript.recordInput(`<mouse:scroll:${scrollMode}:${input.direction}@${input.col},${input.row}>`)
     session.sessionInfo.lastActivityAt = new Date().toISOString()
     await this.waitRenderAfterInput(session)
   }
@@ -859,6 +989,20 @@ export class TmuxCore {
     // Step 3: 执行
     const execResult = await session.controlChannel!.execute(compiled.args)
 
+    // 提取 target 和编译命令用于 audit
+    const astTarget = "target" in ast && ast.target !== undefined
+      ? formatTmuxTarget(ast.target)
+      : undefined
+    const compiledCmd = compiled.args.join(" ")
+
+    // Step 4: 如果需要 reattach（attach 命令），执行完整 reattach 流程
+    if (compiled.needsReattach && ast.kind === "attach") {
+      const newTarget = formatTmuxTargetFromAst(ast)
+      if (newTarget !== null) {
+        await this.reattachToTarget(session, newTarget)
+      }
+    }
+
     return {
       ok: execResult.ok,
       command: input,
@@ -868,7 +1012,69 @@ export class TmuxCore {
       errorMessage: execResult.ok ? undefined : execResult.errorMessage,
       needsTreeRefresh: compiled.needsTreeRefresh,
       needsReattach: compiled.needsReattach,
+      tmuxCommandTarget: astTarget,
+      tmuxCommandDestructive: compiled.destructive,
+      compiledCommand: compiledCmd.length > 200 ? `${compiledCmd.slice(0, 197)}...` : compiledCmd,
     }
+  }
+
+  /**
+   * 重新 attach 到新 target（关闭旧 render → 启动新 render → 重置 adapter → 等待 stable）。
+   *
+   * @param session - 当前 session
+   * @param newTarget - 新的 attach target（session name / window / pane）
+   */
+  private async reattachToTarget(session: TmuxCoreSession, newTarget: string): Promise<void> {
+    this.logger.info("tmux-core reattaching to new target", {
+      sessionId: session.sessionInfo.sessionId,
+      oldTarget: session.attachTarget,
+      newTarget,
+    })
+
+    // 更新 attach target
+    session.attachTarget = newTarget
+
+    // 执行与 recoverRenderChannel 相同的重新 attach 流程
+    await this.recoverRenderChannel(session)
+  }
+
+  /**
+   * 通过 control channel 查询完整 tmux 树。
+   *
+   * @param sessionId - 当前 session ID
+   * @returns tmux sessions / windows / panes 扁平树
+   */
+  async listTree(sessionId: string): Promise<TmuxTreeResult> {
+    const session = this.getLiveSession(sessionId)
+    this.assertControlChannelConnected(session)
+
+    const sessionsResult = await session.controlChannel!.execute(["list-sessions", "-F", "\"#{session_id}:#{session_name}:#{session_created}\""])
+    const windowsResult = await session.controlChannel!.execute(["list-windows", "-a", "-F", "\"#{window_id}:#{session_name}:#{window_index}:#{window_name}:#{window_width}:#{window_height}\""])
+    const panesResult = await session.controlChannel!.execute(["list-panes", "-a", "-F", "\"#{pane_id}:#{session_name}:#{window_index}:#{pane_index}:#{pane_title}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}:#{pane_active}\""])
+
+    this.assertTmuxControlResponseOk(sessionsResult, "list-sessions", sessionId)
+    this.assertTmuxControlResponseOk(windowsResult, "list-windows", sessionId)
+    this.assertTmuxControlResponseOk(panesResult, "list-panes", sessionId)
+
+    const sessions: TmuxTreeResult["sessions"] = []
+    for (const line of sessionsResult.output) {
+      const parsed = this.parseTmuxTreeSessionLine(line)
+      if (parsed !== null) sessions.push(parsed)
+    }
+
+    const windows: TmuxTreeResult["windows"] = []
+    for (const line of windowsResult.output) {
+      const parsed = this.parseTmuxTreeWindowLine(line)
+      if (parsed !== null) windows.push(parsed)
+    }
+
+    const panes: TmuxTreeResult["panes"] = []
+    for (const line of panesResult.output) {
+      const parsed = this.parseTmuxTreePaneLine(line)
+      if (parsed !== null) panes.push(parsed)
+    }
+
+    return { sessions, windows, panes }
   }
 
   // ─── 其他操作 ─────────────────────────────────────────────────────────────
@@ -895,7 +1101,10 @@ export class TmuxCore {
     session.sessionInfo.lastActivityAt = new Date().toISOString()
     session.transcript.recordResize(cols, rows)
 
-    // 通过 CLI fallback 刷新 tmux session 尺寸
+    // tmux resize-window 触发 layout-change 通知，但通知可能在 snapshot 调用之前未到达；
+    // 主动标记 reshaping 确保 snapshot/waitStable 等待布局稳定。
+    session.renderPhase = "reshaping"
+
     await session.transport.execTmux(["resize-window", "-t", session.tmuxId, "-x", String(cols), "-y", String(rows)])
   }
 
@@ -1092,16 +1301,16 @@ export class TmuxCore {
    * 确保 node-pty 已加载（懒加载）。
    *
    * node-pty 是 native addon，部分环境可能安装但运行时加载失败。
-   * 使用 require() 同步加载以匹配 native-pty-provider.ts 的模式。
+   * node-pty 是 C++ addon，在 ESM/tsx/vitest 环境中 require() 可能失败，
+   * 使用 await import() 动态加载更可靠（与 native-pty-provider.ts 保持一致）。
    *
    * @returns node-pty 模块
    * @throws DependencyMissingError 如果 node-pty 不可用
    */
-  private ensureNodePty(): NodePtyModule {
+  private async ensureNodePty(): Promise<NodePtyModule> {
     if (this.nodePtyModule !== null) return this.nodePtyModule
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- node-pty 是 C++ addon，必须 require
-      this.nodePtyModule = require("node-pty") as NodePtyModule
+      this.nodePtyModule = await import("node-pty") as NodePtyModule
       return this.nodePtyModule
     } catch {
       throw new DependencyMissingError("node-pty")
@@ -1139,9 +1348,18 @@ export class TmuxCore {
    */
   private handleRenderData(session: TmuxCoreSession, data: string): void {
     try {
+      const now = Date.now()
+      const plainText = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").trim()
+      if (plainText.includes("can't find session") || plainText.includes("error connecting to")) {
+        this.logger.warn("tmux-core render channel error output", {
+          sessionId: session.sessionInfo.sessionId,
+          tmuxId: session.tmuxId,
+          errorText: plainText.substring(0, 200),
+        })
+      }
       session.xtermAdapter.write(data)
       session.renderDirty = true
-      session.lastRenderWriteAt = Date.now()
+      session.lastRenderWriteAt = now
       session.sessionInfo.lastActivityAt = new Date().toISOString()
       session.transcript.recordOutput(data)
     } catch (error) {
@@ -1168,6 +1386,9 @@ export class TmuxCore {
     this.logger.info("tmux-core render channel process exited", {
       sessionId: session.sessionInfo.sessionId,
       exitCode,
+      tmuxId: session.tmuxId,
+      renderDirty: session.renderDirty,
+      snapshotCount: session.snapshotCount,
     })
   }
 
@@ -1180,7 +1401,13 @@ export class TmuxCore {
   private handleControlNotification(session: TmuxCoreSession, notification: TmuxControlNotification): void {
     switch (notification.type) {
       case "layout-change":
-        // 布局变化，标记需要刷新 pane geometry
+        session.renderPhase = "reshaping"
+        this.refreshPaneGeometry(session).catch((error: unknown) => {
+          this.logger.debug("tmux-core async refreshPaneGeometry after layout-change failed", {
+            sessionId: session.sessionInfo.sessionId,
+            error: this.stringifyUnknownError(error),
+          })
+        })
         this.logger.debug("tmux-core layout-change", {
           sessionId: session.sessionInfo.sessionId,
           windowId: notification.windowId,
@@ -1188,7 +1415,13 @@ export class TmuxCore {
         break
 
       case "window-pane-changed":
-        // 活动 pane 变化，需要刷新 pane geometry
+        session.renderPhase = "reshaping"
+        this.refreshPaneGeometry(session).catch((error: unknown) => {
+          this.logger.debug("tmux-core async refreshPaneGeometry after window-pane-changed failed", {
+            sessionId: session.sessionInfo.sessionId,
+            error: this.stringifyUnknownError(error),
+          })
+        })
         this.logger.debug("tmux-core window-pane-changed", {
           sessionId: session.sessionInfo.sessionId,
           windowId: notification.windowId,
@@ -1229,23 +1462,14 @@ export class TmuxCore {
     }
 
     try {
-      const result = await session.controlChannel.execute(["list-panes", "-t", session.tmuxId, "-F", "#{pane_id}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}:#{pane_active}"])
-      if (result.ok && result.output.length > 0) {
-        // 取第一个 pane（后续 Phase 可扩展为多 pane）
-        const firstLine = result.output[0]
-        if (firstLine !== undefined) {
-          const parts = firstLine.split(":")
-          if (parts.length >= 6) {
-            session.paneGeometry = {
-              paneId: parts[0] ?? "",
-              left: Number.parseInt(parts[1] ?? "0", 10),
-              top: Number.parseInt(parts[2] ?? "0", 10),
-              width: Number.parseInt(parts[3] ?? "0", 10),
-              height: Number.parseInt(parts[4] ?? "0", 10),
-              active: (parts[5] ?? "0") === "1",
-            }
-          }
+      const result = await session.controlChannel.execute(["list-panes", "-t", session.tmuxId, "-F", "\"#{pane_id}:#{pane_left}:#{pane_top}:#{pane_width}:#{pane_height}:#{pane_active}\""])
+      if (result.ok) {
+        const parsedGeometries: PaneGeometry[] = []
+        for (const line of result.output) {
+          const geometry = parsePaneGeometryLine(line)
+          if (geometry !== null) parsedGeometries.push(geometry)
         }
+        session.paneGeometries = parsedGeometries
       }
     } catch (error) {
       this.logger.debug("tmux-core refreshPaneGeometry failed", {
@@ -1256,19 +1480,201 @@ export class TmuxCore {
   }
 
   /**
-   * 输入后等待渲染收敛。
+   * 通过 control channel send-keys -l 发送文本，自动处理换行符。
+   *
+   * tmux -C 协议用换行符(0x0A)分隔命令，send-keys -l 的参数中
+   * 不能包含真实换行符。此方法将文本按 \n/\r 拆分：
+   * - 非换行部分 → send-keys -l <segment>
+   * - \n 或 \r   → send-keys Enter
+   *
+   * @param session - TmuxCoreSession
+   * @param text - 要发送的文本（可包含换行符）
+   */
+  private async sendLiteralText(session: TmuxCoreSession, text: string): Promise<void> {
+    const segments = text.split(/([\n\r])/)
+    for (const segment of segments) {
+      if (segment === "\n" || segment === "\r") {
+        await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "Enter"])
+      } else if (segment.length > 0) {
+        await session.controlChannel!.execute(["send-keys", "-t", session.attachTarget, "-l", segment])
+      }
+    }
+  }
+
+  /**
+   * 输入后等待渲染收敛（完整算法）。
+   *
+   * 算法：
+   * 1. 记录 beforeHash（pane view hash）
+   * 2. 等待 renderDirty 变为 true 或短延迟（50ms）
+   * 3. 如果 renderDirty → 等待 render idle（轮询 lastRenderWriteAt）
+   * 4. 计算 afterHash
+   * 5. 如果 beforeHash === afterHash → lastInputNoVisualChange = true
    *
    * @param session - TmuxCoreSession
    */
   private async waitRenderAfterInput(session: TmuxCoreSession): Promise<void> {
-    const deadline = Date.now() + WAIT_RENDER_AFTER_INPUT_MS
-    while (Date.now() < deadline) {
-      if (!session.renderDirty) {
-        return
-      }
+    // Step 1: 记录 beforeHash
+    const beforeHash = this.computePaneHash(session)
+
+    // Step 2: 等待 render channel 有数据或短延迟
+    const shortDelayMs = 50
+    const shortDeadline = Date.now() + shortDelayMs
+    while (Date.now() < shortDeadline && !session.renderDirty) {
       await delay(10)
     }
-    // 超时不报错，只跳过等待
+
+    // Step 3: 如果 renderDirty，等待 render idle
+    if (session.renderDirty) {
+      const idleDeadline = Date.now() + WAIT_RENDER_AFTER_INPUT_MS
+      while (Date.now() < idleDeadline) {
+        const idleSince = Date.now() - session.lastRenderWriteAt
+        if (idleSince > 30) {
+          break
+        }
+        await delay(10)
+      }
+    }
+
+    // Step 4: 计算 afterHash
+    const afterHash = this.computePaneHash(session)
+
+    // Step 5: 判断是否有视觉变化
+    session.lastInputNoVisualChange = beforeHash === afterHash && beforeHash !== ""
+  }
+
+  /** 计算 pane view hash（用于输入前后对比） */
+  private computePaneHash(session: TmuxCoreSession): string {
+    const screen = session.xtermAdapter.readScreen("viewport")
+    const screenText = screen.lines.map((line) => line.text).join("\n")
+    const activeGeometry = this.getActivePaneGeometry(session)
+    const paneText = activeGeometry !== null
+      ? cropToPane(screenText, activeGeometry, screen.cols)
+      : screenText
+    return hashScreen(paneText)
+  }
+
+  private async waitForReshapeStable(session: TmuxCoreSession, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    let previousGeometryHash: string | null = null
+    let previousPaneHash: string | null = null
+
+    while (Date.now() < deadline) {
+      const idleSince = Date.now() - session.lastRenderWriteAt
+      if (idleSince > RESHAPE_RENDER_IDLE_MS) {
+        await this.refreshPaneGeometry(session)
+        const geometryHash = this.hashPaneGeometries(session.paneGeometries)
+        const screen = session.xtermAdapter.readScreen("viewport")
+        const screenText = screen.lines.map((line) => line.text).join("\n")
+        const activeGeometry = this.getActivePaneGeometry(session)
+        const paneText = activeGeometry !== null
+          ? cropToPane(screenText, activeGeometry, screen.cols)
+          : screenText
+        const paneHash = hashScreen(paneText)
+
+        if (geometryHash === previousGeometryHash && paneHash === previousPaneHash) {
+          return true
+        }
+
+        previousGeometryHash = geometryHash
+        previousPaneHash = paneHash
+      }
+
+      await delay(RESHAPE_POLL_MS)
+    }
+
+    return false
+  }
+
+  /**
+   * 检测渲染污染 heuristic。
+   *
+   * 检测以下情况：
+   * 1. 单行中重复字符比例异常高（如 "*****----////"）
+   * 2. XtermAdapter 维度与 tmux tree geometry 不一致
+   * 3. 非打印控制残留
+   *
+   * 注意：heuristic 只用于触发 recovery，不用于删除屏幕内容。
+   *
+   * @param session - TmuxCoreSession
+   * @returns 是否检测到污染
+   */
+  private detectRenderPollution(session: TmuxCoreSession): PollutionType[] {
+    const screen = session.xtermAdapter.readScreen("viewport")
+    const screenText = screen.lines.map((line) => line.text).join("\n")
+    const activeGeometry = this.getActivePaneGeometry(session)
+    const detected = detectPollutionHeuristics(screenText, screen.cols, screen.rows, activeGeometry)
+    for (const type of detected) {
+      this.logger.debug("tmux-core pollution detected", {
+        sessionId: session.sessionInfo.sessionId,
+        type,
+      })
+    }
+    return detected
+  }
+
+  private async recoverRenderChannel(session: TmuxCoreSession): Promise<void> {
+    const recoveryStartedStatus = session.sessionInfo.status
+    session.renderPhase = "reattaching"
+
+    const previousRenderPty = session.renderPty
+    session.renderPty = null
+    if (previousRenderPty !== null) {
+      try {
+        if (process.platform === "win32") {
+          previousRenderPty.kill()
+        } else {
+          previousRenderPty.kill("SIGTERM")
+        }
+      } catch (error) {
+        this.logger.debug("tmux-core old render channel kill during recovery failed", {
+          sessionId: session.sessionInfo.sessionId,
+          error: this.stringifyUnknownError(error),
+        })
+      }
+    }
+
+    session.xtermAdapter.dispose()
+    session.xtermAdapter = new XtermAdapter(session.cols, session.rows)
+    session.renderDirty = false
+    session.lastRenderWriteAt = Date.now()
+
+    const ptyModule = await this.ensureNodePty()
+    const renderOpts: RenderChannelOpts = {
+      attachTarget: session.attachTarget,
+      cols: session.cols,
+      rows: session.rows,
+    }
+    const renderSpawnArgs = session.transport.getRenderSpawnArgs(renderOpts)
+    const renderPty = this.spawnRenderPty(renderSpawnArgs, ptyModule)
+    session.renderPty = renderPty
+
+    const dataDisposable = renderPty.onData((data) => {
+      if (session.renderPty !== renderPty) return
+      this.handleRenderData(session, data)
+    })
+    const exitDisposable = renderPty.onExit((event) => {
+      if (session.renderPty !== renderPty) return
+      this.handleRenderExit(session, event.exitCode)
+    })
+    this.disposables.push(dataDisposable, exitDisposable)
+
+    await this.waitRenderAfterInput(session)
+    if (session.renderPty === null) {
+      throw new TmuxControlError("Render channel exited during recovery", {
+        sessionId: session.sessionInfo.sessionId,
+      })
+    }
+    await this.refreshPaneGeometry(session)
+
+    session.renderPhase = "normal"
+    if (recoveryStartedStatus === "starting" || recoveryStartedStatus === "running") {
+      session.sessionInfo.status = "running"
+    }
+
+    this.logger.info("tmux-core render recovery completed", {
+      sessionId: session.sessionInfo.sessionId,
+    })
   }
 
   /**
@@ -1322,6 +1728,68 @@ export class TmuxCore {
     }
   }
 
+  private createControlChannel(transport: TmuxTransport): TmuxControlChannelLike {
+    return hasInProcessControl(transport) ? transport.createControlChannel() : new TmuxControlChannel()
+  }
+
+  private emptyControlSpawnArgs(): ControlSpawnResult {
+    return { command: "", args: [] }
+  }
+
+  /**
+   * 通过 capture-pane CLI 获取快照。
+   *
+   * 此路径仅在 renderPty 不可用且 transport 支持 in-process control channel 时启用
+   * （如 attach 尚未 spawn renderPty 的过渡状态）。
+   * 主流程通过 renderPty XtermAdapter 读取屏幕，不使用 capture-pane。
+   */
+  private async snapshotViaExecTmux(session: TmuxCoreSession, mode: TerminalSnapshotMode): Promise<TerminalSnapshot> {
+    const captureResult = await session.transport.execTmux(["capture-pane", "-t", session.attachTarget, "-p", "-e"])
+    if (captureResult.exitCode !== 0) {
+      throw new TmuxControlError(
+        `tmux capture-pane failed: ${captureResult.stderr}`,
+        { sessionId: session.sessionInfo.sessionId, details: { exitCode: captureResult.exitCode, stderr: captureResult.stderr } },
+      )
+    }
+
+    await session.xtermAdapter.write(captureResult.stdout)
+    const screen = session.xtermAdapter.readScreen(mode)
+    const highlights = session.xtermAdapter.detectHighlights(mode)
+    const screenText = screen.lines.map((line) => line.text).join("\n")
+    const historyResult = await session.transport.execTmux(["display-message", "-t", session.attachTarget, "-p", "#{history_size}"])
+    const titleResult = await session.transport.execTmux(["display-message", "-t", session.attachTarget, "-p", "#{session_name}"])
+    const scrollbackLineCount = Number.parseInt(historyResult.stdout.trim(), 10)
+    const riskSignals = detectRiskSignals(screenText)
+    const screenHash = hashScreen(screenText)
+    const changed = session.renderDirty || session.lastScreenHash !== screenHash
+
+    const snapshotResult = createSnapshot({
+      sessionId: session.sessionInfo.sessionId,
+      screen: screenText,
+      cursor: screen.cursor,
+      cols: screen.cols,
+      rows: screen.rows,
+      scrollbackLineCount: Number.isFinite(scrollbackLineCount) ? scrollbackLineCount : screen.scrollbackLineCount,
+      status: session.sessionInfo.status,
+      changed,
+      exitCode: session.sessionInfo.exitCode,
+      title: titleResult.stdout.trim() || screen.title,
+      isFullscreen: screen.isAltBuffer,
+      highlights,
+      riskSignals,
+      renderStatus: session.renderPhase,
+    })
+
+    session.lastScreenHash = screenHash
+    session.snapshotCount += 1
+    session.renderDirty = false
+    session.sessionInfo.lastActivityAt = snapshotResult.timestamp
+    session.xtermAdapter.markClean()
+    session.transcript.recordSnapshot(snapshotResult.screen)
+
+    return snapshotResult
+  }
+
   /**
    * 创建 tmux session name（tumcp_ 前缀 + 随机 hex）。
    *
@@ -1331,33 +1799,99 @@ export class TmuxCore {
     return `${TMUX_SESSION_PREFIX}${randomBytes(8).toString("hex")}`
   }
 
-  /**
-   * 裁剪 screen text 到目标 pane 区域。
-   *
-   * @param screenText - 完整 screen 文本
-   * @param geometry - pane geometry
-   * @param totalCols - 总列数
-   * @returns 裁剪后的 screen 文本
-   */
-  private cropToPane(screenText: string, geometry: PaneGeometry, totalCols: number): string {
-    const lines = screenText.split("\n")
-    const croppedLines: string[] = []
+  private createRemoteTmuxSessionName(): string {
+    return `rtumcp_${randomBytes(4).toString("hex")}`
+  }
 
-    for (let row = geometry.top; row < geometry.top + geometry.height && row < lines.length; row += 1) {
-      const line = lines[row]
-      if (line === undefined) continue
-      // 裁剪列范围
-      const startCol = Math.min(geometry.left, line.length)
-      const endCol = Math.min(geometry.left + geometry.width, line.length)
-      croppedLines.push(line.slice(startCol, endCol))
+  private getActivePaneGeometry(session: TmuxCoreSession): PaneGeometry | null {
+    return session.paneGeometries.find((geometry) => geometry.active) ?? session.paneGeometries[0] ?? null
+  }
+
+  private parseTmuxTreeSessionLine(line: string): TmuxTreeResult["sessions"][number] | null {
+    const parts = this.stripTmuxFormatQuotes(line).split(":")
+    if (parts.length < 3) return null
+
+    return {
+      id: parts[0] ?? "",
+      name: parts.slice(1, -1).join(":"),
+      created: parts[parts.length - 1] ?? "",
     }
+  }
 
-    // 如果总列数不同，用空格填充到 geometry.width
-    if (totalCols !== geometry.width) {
-      return croppedLines.map((line) => line.padEnd(geometry.width)).join("\n")
+  private parseTmuxTreeWindowLine(line: string): TmuxTreeResult["windows"][number] | null {
+    const parts = this.stripTmuxFormatQuotes(line).split(":")
+    if (parts.length < 6) return null
+
+    const width = parts[parts.length - 2]
+    const height = parts[parts.length - 1]
+
+    return {
+      id: parts[0] ?? "",
+      sessionName: parts[1] ?? "",
+      index: this.parseIntegerField(parts[2]),
+      name: parts.slice(3, -2).join(":"),
+      width: this.parseIntegerField(width),
+      height: this.parseIntegerField(height),
     }
+  }
 
-    return croppedLines.join("\n")
+  private parseTmuxTreePaneLine(line: string): TmuxTreeResult["panes"][number] | null {
+    const parts = this.stripTmuxFormatQuotes(line).split(":")
+    if (parts.length < 10) return null
+
+    const left = parts[parts.length - 5]
+    const top = parts[parts.length - 4]
+    const width = parts[parts.length - 3]
+    const height = parts[parts.length - 2]
+    const active = parts[parts.length - 1]
+
+    return {
+      id: parts[0] ?? "",
+      sessionName: parts[1] ?? "",
+      windowIndex: this.parseIntegerField(parts[2]),
+      index: this.parseIntegerField(parts[3]),
+      title: parts.slice(4, -5).join(":"),
+      left: this.parseIntegerField(left),
+      top: this.parseIntegerField(top),
+      width: this.parseIntegerField(width),
+      height: this.parseIntegerField(height),
+      active: active === "1",
+    }
+  }
+
+  private stripTmuxFormatQuotes(line: string): string {
+    const trimmed = line.trim()
+    if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+      return trimmed.slice(1, -1)
+    }
+    return trimmed
+  }
+
+  private parseIntegerField(value: string | undefined): number {
+    const parsed = Number.parseInt(value ?? "0", 10)
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+
+  private hashPaneGeometries(geometries: PaneGeometry[]): string {
+    return geometries
+      .map((geometry) => `${geometry.paneId}:${geometry.left}:${geometry.top}:${geometry.width}:${geometry.height}:${geometry.active ? "1" : "0"}`)
+      .join("|")
+  }
+
+  private assertTmuxControlResponseOk(response: TmuxControlResponse, command: string, sessionId: string): void {
+    if (response.ok) return
+
+    throw new TmuxControlError(
+      `tmux ${command} failed: ${response.errorMessage ?? `exit code ${response.exitCode}`}`,
+      {
+        sessionId,
+        details: {
+          command,
+          exitCode: response.exitCode,
+          errorMessage: response.errorMessage,
+        },
+      },
+    )
   }
 
   /**

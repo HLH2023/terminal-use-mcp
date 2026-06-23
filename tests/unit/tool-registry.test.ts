@@ -15,8 +15,8 @@ import type { ToolCategory } from "../../src/tools/tool-registry.js"
 import type { CapabilityPreset, ToolProfile } from "../../src/config.js"
 
 describe("ALL_TOOL_NAMES", () => {
-  it("包含恰好 29 个工具名称", () => {
-    expect(ALL_TOOL_NAMES).toHaveLength(29)
+  it("包含恰好 30 个工具名称", () => {
+    expect(ALL_TOOL_NAMES).toHaveLength(30)
   })
 
   it("所有名称以 terminal. 开头", () => {
@@ -67,9 +67,9 @@ describe("TOOL_CATEGORIES", () => {
     expect(remoteTools).toHaveLength(3)
   })
 
-  it("tmux 分类包含 2 个工具", () => {
+  it("tmux 分类包含 3 个工具", () => {
     const tmuxTools = ALL_TOOL_NAMES.filter((n) => TOOL_CATEGORIES[n] === "tmux")
-    expect(tmuxTools).toHaveLength(2)
+    expect(tmuxTools).toHaveLength(3)
   })
 })
 
@@ -100,8 +100,8 @@ describe("Profile tool sets", () => {
     }
   })
 
-  it("FULL_TOOLS 包含所有 29 个工具", () => {
-    expect(FULL_TOOLS.size).toBe(29)
+  it("FULL_TOOLS 包含所有 30 个工具", () => {
+    expect(FULL_TOOLS.size).toBe(30)
   })
 
   it("ALWAYS_REGISTERED_TOOLS 包含 terminal.health", () => {
@@ -134,8 +134,8 @@ describe("resolveAutoProfile", () => {
     for (const tool of PERSISTENT_TUI_TOOLS) {
       expect(result.has(tool)).toBe(true)
     }
-    // full = 29, 并集应等于 full（因为两者互补覆盖所有工具）
-    expect(result.size).toBe(29)
+    // full = 30, 并集应等于 full（因为两者互补覆盖所有工具）
+    expect(result.size).toBe(30)
   })
 
   it("full → FULL_TOOLS", () => {
@@ -157,9 +157,9 @@ describe("resolveEnabledTools", () => {
     disabledTools: [] as string[],
   }
 
-  it("profile=full 返回所有 29 个工具", () => {
+  it("profile=full 返回所有 30 个工具", () => {
     const result = resolveEnabledTools({ ...baseOpts, toolProfile: "full" as ToolProfile })
-    expect(result.registeredTools).toHaveLength(29)
+    expect(result.registeredTools).toHaveLength(30)
     expect(result.disabledTools).toHaveLength(0)
   })
 
@@ -178,7 +178,7 @@ describe("resolveEnabledTools", () => {
       toolProfile: "auto" as ToolProfile,
       capabilityPreset: "full" as CapabilityPreset,
     })
-    expect(result.registeredTools).toHaveLength(29)
+    expect(result.registeredTools).toHaveLength(30)
   })
 
   it("extraTools 追加工具到 profile", () => {

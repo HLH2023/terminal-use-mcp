@@ -16,6 +16,7 @@ import type {
   ProviderCapabilities,
   ProviderName,
   ScrollDirection,
+  ScrollMode,
   TerminalProvider,
   WaitOptions,
   WaitStableOptions,
@@ -382,7 +383,7 @@ export class ProviderExecutor {
     })
   }
 
-  async executeScroll(sessionId: string, direction: ScrollDirection, lines: number): Promise<void> {
+  async executeScroll(sessionId: string, direction: ScrollDirection, lines: number, mode: ScrollMode = "program-key"): Promise<void> {
     const session = this.sm.getSession(sessionId)
     const provider = this.getProvider(session.providerName)
     this.assertCapability(provider, "supportsScroll", "scroll")
@@ -390,7 +391,7 @@ export class ProviderExecutor {
       throw new ProviderCapabilityUnsupportedError(provider.name, "scroll")
     }
     await session.queue.enqueue(async () => {
-      await provider.scroll?.(session.providerSessionId, direction, lines)
+      await provider.scroll?.(session.providerSessionId, direction, lines, mode)
       this.sm.touchSession(session.sessionId)
     })
   }
