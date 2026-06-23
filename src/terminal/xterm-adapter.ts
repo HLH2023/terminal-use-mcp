@@ -223,6 +223,12 @@ export class XtermAdapter {
     return this.lastWriteAt
   }
 
+  /** 快速检测当前是否处于 alt buffer（全屏 TUI），无需完整 readScreen()。 */
+  isAltBufferActive(): boolean {
+    if (this.disposed) return false
+    return this.terminal.buffer.active === this.terminal.buffer.alternate
+  }
+
   /** 获取终端标题 */
   getTitle(): string | undefined {
     return this.title

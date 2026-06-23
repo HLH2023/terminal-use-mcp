@@ -91,6 +91,8 @@ export type WaitStableOptions = {
   timeoutMs: number
   /** 超时后默认返回当前快照；严格调用方可设为 false 保留 SESSION_TIMEOUT 抛错语义。 */
   snapshotOnTimeout?: boolean
+  /** 跳过 idle 时间检查，仅要求连续两次 screenHash 相同即视为稳定。alt buffer 下 Ink spinner 等持续更新使 idle 检查永远不满足。 */
+  skipIdleCheck?: boolean
 }
 
 export type ExportOptions = {

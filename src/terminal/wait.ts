@@ -29,11 +29,18 @@ export type WaitStableOptions = {
    * 超时后是否返回当前快照。
    *
    * 注意：本纯算法文件不读取该字段；它只定义跨 Provider 的等待语义，
-   * 实际“返回快照或抛错”的分支由 Provider 轮询循环处理。
+   * 实际"返回快照或抛错"的分支由 Provider 轮询循环处理。
    */
   snapshotOnTimeout?: boolean
   /** 轮询间隔 (ms, 默认 min(100, idleMs/4)) */
   pollIntervalMs?: number
+  /**
+   * 跳过 idle 时间检查，仅要求连续两次 screenHash 相同即视为稳定。
+   *
+   * alt buffer（全屏 TUI）下 Ink spinner 等持续更新会使 lastWriteAt 不断刷新，
+   * 导致 idle 检查永远不满足。此时只需内容 hash 稳定即可判定。
+   */
+  skipIdleCheck?: boolean
 }
 
 /** 当前屏幕状态 (由调用者提供) */
@@ -110,6 +117,10 @@ export function checkScreenStable(
 
   if (currentState.screenHash !== previousState.screenHash) {
     return { stable: false, reason: "屏幕内容仍在变化" }
+  }
+
+  if (options.skipIdleCheck === true) {
+    return { stable: true }
   }
 
   const idleForMs = currentState.now - currentState.lastWriteAt

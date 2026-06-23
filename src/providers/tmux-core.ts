@@ -538,10 +538,10 @@ export class TmuxCore {
   /**
    * 获取屏幕快照。
    *
-   * 从 render channel 的 XtermAdapter 读取（不再使用 capture-pane）。
-   *
-   * 默认使用 pane view（裁剪目标 pane 区域），
-   * 仅当 view="client" 时返回完整 tmux client screen。
+   * 渲染策略：
+   * - 普通模式：从 render channel 的 XtermAdapter 读取
+   * - Alt buffer（全屏 TUI）：用 capture-pane -p -e 作为主数据源，
+   *   通过临时 XtermAdapter 解析，避免 render channel 增量数据丢失问题
    *
    * @param sessionId - session ID
    * @param mode - snapshot 模式（viewport 或 full）
@@ -569,6 +569,20 @@ export class TmuxCore {
       await this.waitForRenderPhaseNormal(session, INITIAL_RENDER_STABLE_MS)
     }
 
+    const isAltBuffer = session.xtermAdapter.isAltBufferActive()
+
+    // Alt buffer（全屏 TUI）下用 capture-pane 获取更可靠的内容
+    if (isAltBuffer) {
+      return this.snapshotViaCapturePane(session, mode, view, entryRenderPhase)
+    }
+
+    return this.snapshotViaRenderChannel(session, mode, view, entryRenderPhase)
+  }
+
+  /**
+   * 通过 render channel XtermAdapter 获取快照（普通模式）。
+   */
+  private async snapshotViaRenderChannel(session: TmuxCoreSession, mode: TerminalSnapshotMode, view: TmuxSnapshotView, entryRenderPhase: RenderPhase): Promise<TerminalSnapshot> {
     const screen = session.xtermAdapter.readScreen(mode)
     const highlights: Highlight[] = session.xtermAdapter.detectHighlights(mode)
     const screenText = screen.lines.map((line) => line.text).join("\n")
@@ -579,7 +593,6 @@ export class TmuxCore {
     let effectiveScreenText: string
     if (view === "pane") {
       if (activeGeometry === null) {
-        // geometry 不可用时降级到 client view，而非中断操作
         this.logger.warn("tmux-core pane geometry unavailable, falling back to client view", {
           sessionId: session.sessionInfo.sessionId,
         })
@@ -613,14 +626,12 @@ export class TmuxCore {
     session.lastScreenHash = screenHash
     session.snapshotCount += 1
 
-    // 污染检测 heuristic（仅每 5 次 snapshot 检查一次，避免性能开销）
     if (session.snapshotCount % 5 === 0 && this.detectRenderPollution(session).length > 0) {
       this.logger.warn("tmux-core render pollution detected; triggering recovery", {
         sessionId: session.sessionInfo.sessionId,
       })
       await this.recoverRenderChannel(session)
-      // recovery 后重新读取 screen
-      return this.snapshot(sessionId, mode, view)
+      return this.snapshot(session.sessionInfo.sessionId, mode, view)
     }
 
     session.renderDirty = false
@@ -629,6 +640,77 @@ export class TmuxCore {
     session.transcript.recordSnapshot(snapshotResult.screen)
 
     return snapshotResult
+  }
+
+  /**
+   * 通过 capture-pane CLI 获取快照（alt buffer 模式）。
+   *
+   * 全屏 TUI（Ink 等）使用 alternate buffer，render channel 的增量数据
+   * 可能因 ANSI 重绘序列导致 XtermAdapter 状态不一致。
+   * capture-pane 从 tmux server 直接获取当前 pane 完整渲染结果，
+   * 通过临时 XtermAdapter 解析，避免污染 session 的主 XtermAdapter。
+   */
+  private async snapshotViaCapturePane(session: TmuxCoreSession, mode: TerminalSnapshotMode, view: TmuxSnapshotView, entryRenderPhase: RenderPhase): Promise<TerminalSnapshot> {
+    const captureResult = await session.transport.execTmux(["capture-pane", "-t", session.attachTarget, "-p", "-e"])
+    if (captureResult.exitCode !== 0) {
+      this.logger.warn("tmux-core capture-pane failed in alt-buffer mode; falling back to render channel", {
+        sessionId: session.sessionInfo.sessionId,
+        stderr: captureResult.stderr.substring(0, 200),
+      })
+      return this.snapshotViaRenderChannel(session, mode, view, entryRenderPhase)
+    }
+
+    // 临时 XtermAdapter 解析 capture-pane 输出，不污染 session 主 adapter
+    const tempAdapter = new XtermAdapter(session.cols, session.rows)
+    try {
+      await tempAdapter.write(captureResult.stdout)
+      const screen = tempAdapter.readScreen(mode)
+      const highlights = tempAdapter.detectHighlights(mode)
+      const screenText = screen.lines.map((line) => line.text).join("\n")
+
+      const titleResult = await session.transport.execTmux(["display-message", "-t", session.attachTarget, "-p", "#{session_name}"])
+      const screenHash = hashScreen(screenText)
+      const changed = session.renderDirty || session.lastScreenHash !== screenHash
+      const riskSignals = detectRiskSignals(screenText)
+
+      const activeGeometry = this.getActivePaneGeometry(session)
+      let effectiveScreenText: string
+      if (view === "pane") {
+        effectiveScreenText = activeGeometry !== null
+          ? cropToPane(screenText, activeGeometry, screen.cols)
+          : screenText
+      } else {
+        effectiveScreenText = screenText
+      }
+
+      const snapshotResult = createSnapshot({
+        sessionId: session.sessionInfo.sessionId,
+        screen: effectiveScreenText,
+        cursor: screen.cursor,
+        cols: screen.cols,
+        rows: screen.rows,
+        scrollbackLineCount: 0,
+        status: session.sessionInfo.status,
+        changed,
+        exitCode: session.sessionInfo.exitCode,
+        title: titleResult.stdout.trim() || screen.title,
+        isFullscreen: true,
+        highlights,
+        riskSignals,
+        renderStatus: entryRenderPhase,
+      })
+
+      session.lastScreenHash = screenHash
+      session.snapshotCount += 1
+      session.renderDirty = false
+      session.sessionInfo.lastActivityAt = snapshotResult.timestamp
+      session.xtermAdapter.markClean()
+      session.transcript.recordSnapshot(snapshotResult.screen)
+
+      return snapshotResult
+    } finally {
+      tempAdapter.dispose()
+    }
   }
 
   /**
@@ -684,6 +766,10 @@ export class TmuxCore {
   async waitStable(sessionId: string, options: WaitStableOptions): Promise<TerminalSnapshot> {
     const startedAt = Date.now()
     const snapshotOnTimeout = options.snapshotOnTimeout ?? true
+    const isAltBuffer = this.getLiveSession(sessionId).xtermAdapter.isAltBufferActive()
+    const stableOptions: WaitStableOptions = isAltBuffer
+      ? { ...options, skipIdleCheck: true }
+      : options
     let previousState: ScreenState | null = null
 
     while (true) {
@@ -705,7 +791,7 @@ export class TmuxCore {
         lastWriteAt: session.xtermAdapter.getLastWriteAt(),
         now,
       }
-      const stable = checkScreenStable(currentState, previousState, options)
+      const stable = checkScreenStable(currentState, previousState, stableOptions)
 
       if (stable.stable) {
         return snapshotResult
