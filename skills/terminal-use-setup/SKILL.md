@@ -128,6 +128,9 @@ Do NOT set `TERMINAL_USE_ALLOW_INLINE_SSH_TARGETS=1` in production configuration
 | `TERMINAL_USE_CLEANUP_INTERVAL_MS` | `60000` (1 min) | How often to check for expired sessions |
 | `TERMINAL_USE_DEFAULT_COLS` | `120` | Default terminal columns for new sessions |
 | `TERMINAL_USE_DEFAULT_ROWS` | `30` | Default terminal rows for new sessions |
+| `TERMINAL_USE_DEFAULT_WAIT_FOR_TEXT_TIMEOUT_MS` | `10000` | Default timeout for `wait_for_text` (ms); overridden by `timeoutMs` param |
+| `TERMINAL_USE_DEFAULT_WAIT_STABLE_TIMEOUT_MS` | `5000` | Default timeout for `wait_stable` (ms); overridden by `timeoutMs` param |
+| `TERMINAL_USE_DEFAULT_WAIT_STABLE_IDLE_MS` | `500` | Default idle window for `wait_stable` (ms); overridden by `idleMs` param |
 | `TERMINAL_USE_LARGE_PASTE_LIMIT` | `2000` | Paste size threshold requiring confirmation (characters) |
 | `TERMINAL_USE_HARD_PASTE_LIMIT` | `10000` | Hard paste size limit — pastes above this are always refused (characters) |
 | `TERMINAL_USE_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |

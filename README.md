@@ -494,6 +494,9 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_CLEANUP_INTERVAL_MS` | How often to check for expired sessions (ms) | `60000` (1 min) |
 | `TERMINAL_USE_DEFAULT_COLS` | Default terminal columns for new sessions | `120` |
 | `TERMINAL_USE_DEFAULT_ROWS` | Default terminal rows for new sessions | `30` |
+| `TERMINAL_USE_DEFAULT_WAIT_FOR_TEXT_TIMEOUT_MS` | Default timeout for `wait_for_text` (ms); overridden by `timeoutMs` param | `10000` |
+| `TERMINAL_USE_DEFAULT_WAIT_STABLE_TIMEOUT_MS` | Default timeout for `wait_stable` (ms); overridden by `timeoutMs` param | `5000` |
+| `TERMINAL_USE_DEFAULT_WAIT_STABLE_IDLE_MS` | Default idle window for `wait_stable` (ms); overridden by `idleMs` param | `500` |
 | `TERMINAL_USE_LARGE_PASTE_LIMIT` | Paste size threshold requiring confirmation (characters) | `2000` |
 | `TERMINAL_USE_HARD_PASTE_LIMIT` | Hard paste size limit — pastes above this are always refused (characters) | `10000` |
 | `TERMINAL_USE_LOG_LEVEL` | Log verbosity: `debug`, `info`, `warn`, `error` | `info` |
@@ -503,6 +506,43 @@ Disabled providers are excluded from registration and auto-selection. `terminal.
 | `TERMINAL_USE_SECRET_ENV_POLICY` | Secret env var handling: `deny`, `warn`, `allow` | `deny` |
 | `TERMINAL_USE_SESSION_ID_MATCH` | Session ID matching: `strict`, `lenient` | `lenient` |
 | `TERMINAL_USE_AUDIT_LOG` | Enable audit log to `<artifactDir>/audit.ndjson` | `1` |
+
+#### Configuration File (config.json)
+
+Environment variables are convenient for quick overrides, but for persistent settings you can create a `config.json` file. The server **does not auto-create** this file — you must create it manually.
+
+**File location** (auto-discovered, no need to specify the path unless you override it):
+
+| Platform | Default path |
+|----------|-------------|
+| Linux | `~/.config/terminal-use-mcp/config.json` |
+| macOS | `~/Library/Application Support/terminal-use-mcp/config.json` |
+| Windows | `%APPDATA%/terminal-use-mcp/config.json` |
+
+Override the config directory with `TERMINAL_USE_CONFIG_DIR`, or the file path directly with `TERMINAL_USE_CONFIG_FILE`.
+
+**File format** ([JSON Schema](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/config-schema.json) · [Zod source](https://github.com/HLH2023/terminal-use-mcp/blob/main/src/targets/config-schema.ts)):
+
+```json
+{
+  "version": 1,
+  "local": {
+    "workspaceRoot": "/path/to/project",
+    "defaultWaitForTextTimeoutMs": 60000,
+    "defaultWaitStableTimeoutMs": 30000,
+    "defaultWaitStableIdleMs": 500,
+    "logLevel": "debug"
+  },
+  "sshDefaults": {
+    "connectTimeoutMs": 15000,
+    "keepaliveIntervalMs": 20000
+  }
+}
+```
+
+All fields are optional — only include what you want to override from defaults. String values support `${ENV_VAR}` placeholders (e.g., `"workspaceRoot": "${HOME}/projects/my-app"`).
+
+**Priority**: environment variables > config.json > code defaults. If the same setting is configured in both `config.json` and an environment variable, the environment variable wins.
 
 #### Path Overrides
 
@@ -669,6 +709,7 @@ For production/agent usage, set `TERMINAL_USE_CWD_POLICY_MODE=strict` to make CW
 
 | Topic | Document |
 |-------|----------|
+| Config file JSON Schema | [docs/config-schema.json](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/config-schema.json) |
 | Security policies, env vars, deny lists | [docs/security.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/security.md) |
 | Scrollback strategy, buffer modes | [docs/scrollback.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/scrollback.md) |
 | Type definitions, error codes | [docs/types-and-errors.md](https://github.com/HLH2023/terminal-use-mcp/blob/main/docs/types-and-errors.md) |

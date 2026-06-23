@@ -145,6 +145,8 @@ snapshot → analyze → type/press → wait → snapshot
 | `terminal.snapshot` | Capture current screen state | `sessionId` |
 | `terminal.wait_for_text` | Wait until specific text appears | `sessionId`, `text`, `regex?`, `timeoutMs?`, `caseSensitive?` |
 | `terminal.wait_stable` | Wait until output stops changing | `sessionId`, `idleMs?`, `timeoutMs?` |
+
+> **Timeout defaults**: `wait_for_text` defaults to 10s, `wait_stable` defaults to 5s / 500ms idle. Override via `timeoutMs` / `idleMs` params — e.g. `timeoutMs: 60000` for slow-starting programs. Configurable via env vars `TERMINAL_USE_DEFAULT_WAIT_FOR_TEXT_TIMEOUT_MS`, `TERMINAL_USE_DEFAULT_WAIT_STABLE_TIMEOUT_MS`, `TERMINAL_USE_DEFAULT_WAIT_STABLE_IDLE_MS`.
 | `terminal.find` | Search for text in screen/scrollback | `sessionId`, `pattern`, `regex?`, `includeScrollback?` |
 | `terminal.scroll` | Scroll the terminal viewport | `sessionId`, `direction`, `lines` |
 
@@ -253,6 +255,8 @@ terminal.start({ command: "lazygit", cwd: "/home/user/project" })
 
 // 2. Wait for it to render
 terminal.wait_stable({ sessionId: "tumcp_a1b2c3", idleMs: 500 })
+// For slow-starting programs (e.g. OpenCode, Claude Code), use longer timeout:
+// terminal.wait_stable({ sessionId: "tumcp_a1b2c3", idleMs: 5000, timeoutMs: 60000 })
 → { screen: "...lazygit interface...", status: "running", ... }
 
 // 3. Take a snapshot to analyze
@@ -750,6 +754,7 @@ terminal.start({
 
 // 4. Wait for REPL prompt
 terminal.wait_for_text({ sessionId: "tumcp_r1s2t3", text: ">>>" })
+// For slow programs, increase timeout: terminal.wait_for_text({ sessionId, text: ">>>", timeoutMs: 30000 })
 → { found: true, ... }
 
 // 5. Interact...
