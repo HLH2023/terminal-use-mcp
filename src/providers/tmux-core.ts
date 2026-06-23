@@ -1614,6 +1614,15 @@ export class TmuxCore {
   }
 
   private async recoverRenderChannel(session: TmuxCoreSession): Promise<void> {
+    // 如果 session 已处于终态，不应再尝试恢复 render channel。
+    // tmux session 已不存在，新 renderPty 会立即退出，导致竞态错误。
+    if (session.sessionInfo.status === "exited" || session.sessionInfo.status === "killed" || session.sessionInfo.status === "error") {
+      throw new TmuxControlError(
+        `Cannot recover render channel: session is in terminal state '${session.sessionInfo.status}'`,
+        { sessionId: session.sessionInfo.sessionId, details: { status: session.sessionInfo.status } },
+      )
+    }
+
     const recoveryStartedStatus = session.sessionInfo.status
     session.renderPhase = "reattaching"
 
