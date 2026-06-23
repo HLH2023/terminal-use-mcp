@@ -261,6 +261,12 @@ export const LocalConfigSchema = z.object({
   sessionIdMatchMode: z.enum(["strict", "lenient"]).optional(),
   /** 是否启用审计日志 */
   auditLogEnabled: z.boolean().optional(),
+  /** wait_for_text 默认超时（毫秒） */
+  defaultWaitForTextTimeoutMs: z.number().int().positive().optional(),
+  /** wait_stable 默认超时（毫秒） */
+  defaultWaitStableTimeoutMs: z.number().int().positive().optional(),
+  /** wait_stable 默认 idle 窗口（毫秒） */
+  defaultWaitStableIdleMs: z.number().int().positive().optional(),
 })
 
 export type LocalConfigInput = z.input<typeof LocalConfigSchema>

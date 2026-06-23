@@ -74,6 +74,12 @@ export type TerminalUseConfig = {
   sessionIdMatchMode: SessionIdMatchMode
   /** 是否启用审计日志 */
   auditLogEnabled: boolean
+  /** wait_for_text 默认超时（毫秒），AI 可通过 timeoutMs 参数覆盖 */
+  defaultWaitForTextTimeoutMs: number
+  /** wait_stable 默认超时（毫秒），AI 可通过 timeoutMs 参数覆盖 */
+  defaultWaitStableTimeoutMs: number
+  /** wait_stable 默认 idle 窗口（毫秒），AI 可通过 idleMs 参数覆盖 */
+  defaultWaitStableIdleMs: number
 }
 
 export type SshDefaultsConfig = {
@@ -183,6 +189,9 @@ type RootConfigFileData = {
     secretEnvPolicy?: SecretEnvPolicy
     sessionIdMatchMode?: SessionIdMatchMode
     auditLogEnabled?: boolean
+    defaultWaitForTextTimeoutMs?: number
+    defaultWaitStableTimeoutMs?: number
+    defaultWaitStableIdleMs?: number
   }
   sshDefaults?: {
     remoteDeniedCwd?: string[]
@@ -325,6 +334,15 @@ export function loadConfig(overrides?: Partial<TerminalUseConfig>): TerminalUseC
     secretEnvPolicy: parseEnumWithFallback(env.TERMINAL_USE_SECRET_ENV_POLICY, local?.secretEnvPolicy, VALID_SECRET_ENV_POLICIES, "deny", "TERMINAL_USE_SECRET_ENV_POLICY"),
     sessionIdMatchMode: parseEnumWithFallback(env.TERMINAL_USE_SESSION_ID_MATCH, local?.sessionIdMatchMode, VALID_SESSION_ID_MATCH_MODES, "lenient", "TERMINAL_USE_SESSION_ID_MATCH"),
     auditLogEnabled: env.TERMINAL_USE_AUDIT_LOG !== undefined ? env.TERMINAL_USE_AUDIT_LOG === "1" : local?.auditLogEnabled ?? true,
+    defaultWaitForTextTimeoutMs: env.TERMINAL_USE_DEFAULT_WAIT_FOR_TEXT_TIMEOUT_MS !== undefined
+      ? parseInt(env.TERMINAL_USE_DEFAULT_WAIT_FOR_TEXT_TIMEOUT_MS, 10)
+      : local?.defaultWaitForTextTimeoutMs ?? 10_000,
+    defaultWaitStableTimeoutMs: env.TERMINAL_USE_DEFAULT_WAIT_STABLE_TIMEOUT_MS !== undefined
+      ? parseInt(env.TERMINAL_USE_DEFAULT_WAIT_STABLE_TIMEOUT_MS, 10)
+      : local?.defaultWaitStableTimeoutMs ?? 5_000,
+    defaultWaitStableIdleMs: env.TERMINAL_USE_DEFAULT_WAIT_STABLE_IDLE_MS !== undefined
+      ? parseInt(env.TERMINAL_USE_DEFAULT_WAIT_STABLE_IDLE_MS, 10)
+      : local?.defaultWaitStableIdleMs ?? 500,
   }
 
   return { ...config, ...overrides }
