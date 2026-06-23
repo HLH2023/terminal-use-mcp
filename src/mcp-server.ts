@@ -136,8 +136,8 @@ export function createMcpServer(
 
   // ── Observation + Input (10) ──
   registerIf("terminal.snapshot", () => registerSnapshotTool(server, executor, logger))
-  registerIf("terminal.wait_for_text", () => registerWaitForTextTool(server, executor, logger))
-  registerIf("terminal.wait_stable", () => registerWaitStableTool(server, executor, logger))
+  registerIf("terminal.wait_for_text", () => registerWaitForTextTool(server, executor, logger, config))
+  registerIf("terminal.wait_stable", () => registerWaitStableTool(server, executor, logger, config))
   registerIf("terminal.find", () => registerFindTool(server, executor, logger))
   registerIf("terminal.scroll", () => registerScrollTool(server, executor, logger))
   registerIf("terminal.type", () => registerTypeTool(server, executor, logger))

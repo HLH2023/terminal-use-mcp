@@ -3,14 +3,18 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { z } from "zod"
 
+import type { TerminalUseConfig } from "../config.js"
 import type { Logger } from "../logger.js"
 import type { WaitOptions } from "../providers/provider.js"
 import type { ProviderExecutor } from "./tool-helpers.js"
 import { errorToToolResult, okToolResult } from "./tool-helpers.js"
 
-const DEFAULT_WAIT_TIMEOUT_MS = 10_000
-
-export function registerWaitForTextTool(server: McpServer, executor: ProviderExecutor, logger: Logger): void {
+export function registerWaitForTextTool(
+  server: McpServer,
+  executor: ProviderExecutor,
+  logger: Logger,
+  config: TerminalUseConfig,
+): void {
   server.registerTool(
     "terminal.wait_for_text",
     {
@@ -19,7 +23,7 @@ export function registerWaitForTextTool(server: McpServer, executor: ProviderExe
         sessionId: z.string().min(1).describe("Session ID from terminal.start — use exact value"),
         text: z.string().min(1).describe("Text to wait for; treated as regex pattern when regex=true"),
         regex: z.boolean().optional().describe("Treat text as a regular expression"),
-        timeoutMs: z.number().int().positive().optional().describe("Timeout in milliseconds, default 10000"),
+        timeoutMs: z.number().int().positive().optional().describe(`Timeout in milliseconds, default ${config.defaultWaitForTextTimeoutMs}`),
         caseSensitive: z.boolean().optional().describe("Case-sensitive match, default true"),
       },
     },
@@ -28,7 +32,7 @@ export function registerWaitForTextTool(server: McpServer, executor: ProviderExe
         const options: WaitOptions = {
           text: input.text,
           regex: input.regex,
-          timeoutMs: input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS,
+          timeoutMs: input.timeoutMs ?? config.defaultWaitForTextTimeoutMs,
           caseSensitive: input.caseSensitive,
         }
         const snapshot = await executor.executeWaitForText(input.sessionId, input.text, options)
