@@ -1,0 +1,287 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "terminal-use-mcp config.json",
+  "description": "Configuration file for terminal-use-mcp MCP server.\n\nLocation (auto-discovered, create manually):\n  Linux:   ~/.config/terminal-use-mcp/config.json\n  macOS:   ~/Library/Application Support/terminal-use-mcp/config.json\n  Windows: %APPDATA%/terminal-use-mcp/config.json\n\nOverride location with TERMINAL_USE_CONFIG_DIR or TERMINAL_USE_CONFIG_FILE env vars.\n\nPriority: environment variables > config.json > code defaults.\nAll fields are optional — only include what you want to override.\nString values support ${ENV_VAR} placeholders (e.g., \"${HOME}/dev\").\nPath values support ~ expansion (e.g., \"~/projects/my-app\").",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Config format version (for future migration). Currently 1."
+    },
+    "local": {
+      "$ref": "#/definitions/LocalConfig"
+    },
+    "sshDefaults": {
+      "$ref": "#/definitions/SshDefaults"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "LocalConfig": {
+      "type": "object",
+      "description": "Local provider configuration — overrides environment variable defaults.",
+      "additionalProperties": false,
+      "properties": {
+        "workspaceRoot": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Workspace root directory (env: TERMINAL_USE_WORKSPACE_ROOT). Supports ~ and ${ENV_VAR}."
+        },
+        "allowedCwdRoots": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Additional allowed CWD paths (env: TERMINAL_USE_ALLOWED_CWD, CSV)."
+        },
+        "cwdPolicyMode": {
+          "type": "string",
+          "enum": ["guarded", "strict"],
+          "description": "CWD policy: 'guarded' (default, allow non-dangerous dirs) or 'strict' (whitelist only). Env: TERMINAL_USE_CWD_POLICY_MODE."
+        },
+        "allowedCommands": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Commands allowed despite built-in deny list (env: TERMINAL_USE_ALLOW_COMMANDS, CSV)."
+        },
+        "deniedCommands": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Additional denied commands beyond built-in list (env: TERMINAL_USE_DENY_COMMANDS, CSV)."
+        },
+        "riskyCommandMode": {
+          "type": "string",
+          "enum": ["deny", "ask", "allow"],
+          "description": "How to handle denied commands: 'deny' (default), 'ask' (prompt), 'allow' (permit). Env: TERMINAL_USE_RISKY_COMMAND_MODE."
+        },
+        "sessionTtlMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Session auto-cleanup timeout in ms (env: TERMINAL_USE_SESSION_TTL_MS). Default: 3600000 (1 hour)."
+        },
+        "cleanupIntervalMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How often to check for expired sessions in ms (env: TERMINAL_USE_CLEANUP_INTERVAL_MS). Default: 60000 (1 min)."
+        },
+        "defaultCols": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default terminal columns (env: TERMINAL_USE_DEFAULT_COLS). Default: 120."
+        },
+        "defaultRows": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default terminal rows (env: TERMINAL_USE_DEFAULT_ROWS). Default: 30."
+        },
+        "artifactDir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Artifact/transcript output directory (env: TERMINAL_USE_ARTIFACT_DIR). Supports ~ and ${ENV_VAR}."
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "description": "Log verbosity (env: TERMINAL_USE_LOG_LEVEL). Default: 'info'."
+        },
+        "providers": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["native-pty", "tmux", "ssh-pty", "ssh-tmux"] },
+          "description": "Enabled provider whitelist (env: TERMINAL_USE_PROVIDERS, CSV). Unset = all enabled."
+        },
+        "capabilityPreset": {
+          "type": "string",
+          "enum": ["local", "remote", "persistent", "remote-persistent", "full", "custom"],
+          "description": "Capability preset controlling provider/tool combo (env: TERMINAL_USE_CAPABILITY_PRESET). Default: 'local'."
+        },
+        "toolProfile": {
+          "type": "string",
+          "enum": ["auto", "minimal", "local-tui", "remote-tui", "persistent-tui", "full", "custom"],
+          "description": "Tool profile controlling registered tools (env: TERMINAL_USE_TOOL_PROFILE). Default: 'auto'."
+        },
+        "tools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Explicitly enabled tools (only in 'custom' profile mode). Env: TERMINAL_USE_TOOLS, CSV."
+        },
+        "extraTools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Extra tools to add on top of profile (env: TERMINAL_USE_EXTRA_TOOLS, CSV)."
+        },
+        "disabledTools": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Tools to remove from profile (env: TERMINAL_USE_DISABLED_TOOLS, CSV)."
+        },
+        "sshAgentDiscoveryMode": {
+          "type": "string",
+          "enum": ["env-only", "xdg", "scan"],
+          "description": "SSH agent socket discovery mode (env: TERMINAL_USE_SSH_AGENT_DISCOVERY). Default: 'xdg'."
+        },
+        "secretEnvPolicy": {
+          "type": "string",
+          "enum": ["deny", "warn", "allow"],
+          "description": "Secret env var handling policy (env: TERMINAL_USE_SECRET_ENV_POLICY). Default: 'deny'."
+        },
+        "sessionIdMatchMode": {
+          "type": "string",
+          "enum": ["strict", "lenient"],
+          "description": "Session ID matching mode (env: TERMINAL_USE_SESSION_ID_MATCH). Default: 'lenient'."
+        },
+        "auditLogEnabled": {
+          "type": "boolean",
+          "description": "Enable audit log (env: TERMINAL_USE_AUDIT_LOG, '1'/'0'). Default: true."
+        },
+        "defaultWaitForTextTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default timeout for wait_for_text in ms (env: TERMINAL_USE_DEFAULT_WAIT_FOR_TEXT_TIMEOUT_MS). AI can override via timeoutMs param. Default: 10000."
+        },
+        "defaultWaitStableTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default timeout for wait_stable in ms (env: TERMINAL_USE_DEFAULT_WAIT_STABLE_TIMEOUT_MS). AI can override via timeoutMs param. Default: 5000."
+        },
+        "defaultWaitStableIdleMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default idle window for wait_stable in ms (env: TERMINAL_USE_DEFAULT_WAIT_STABLE_IDLE_MS). AI can override via idleMs param. Default: 500."
+        }
+      }
+    },
+    "SshDefaults": {
+      "type": "object",
+      "description": "SSH global defaults shared across all profiles.",
+      "additionalProperties": false,
+      "properties": {
+        "remoteDeniedCwd": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Global remote denied directories. Default: ['/', '/root', '/etc', '/boot', '/proc', '/sys']."
+        },
+        "allowTmux": {
+          "type": "boolean",
+          "description": "Allow ssh-tmux provider by default. Default: true."
+        },
+        "connectTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "SSH connection timeout in ms. Default: 10000."
+        },
+        "keepaliveIntervalMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "SSH keepalive interval in ms. Default: 15000."
+        },
+        "agentDiscoveryMode": {
+          "type": "string",
+          "enum": ["env-only", "xdg", "scan"],
+          "description": "SSH agent socket discovery mode. Default: 'xdg'."
+        }
+      }
+    },
+    "SshProfileOverlay": {
+      "type": "object",
+      "description": "SSH profile overlay — only write terminal-use-mcp extensions. Place in profiles/<name>.json. When sshConfigHost is set, SSH connection params are read from ~/.ssh/config.",
+      "additionalProperties": false,
+      "properties": {
+        "sshConfigHost": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OpenSSH ~/.ssh/config Host alias. When set, connection params (host/port/user/identity) are resolved from SSH config."
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SSH hostname (required if no sshConfigHost)."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "SSH port. Default: 22."
+        },
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SSH username (required if no sshConfigHost)."
+        },
+        "auth": {
+          "$ref": "#/definitions/SshAuthRef"
+        },
+        "knownHosts": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to known_hosts file for host key verification."
+        },
+        "pinnedHostFingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Expected host key fingerprint (SHA-256)."
+        },
+        "proxyJump": {
+          "type": "string",
+          "minLength": 1,
+          "description": "SSH ProxyJump configuration (env: TERMINAL_USE_SSH_PROXY_JUMP)."
+        },
+        "defaultCwd": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Default remote working directory for this profile."
+        },
+        "remoteAllowedCwd": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Remote allowed CWD paths for this profile."
+        },
+        "remoteDeniedCwd": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Remote denied CWD paths for this profile."
+        },
+        "allowTmux": {
+          "type": "boolean",
+          "description": "Allow ssh-tmux provider for this profile."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Remote environment variables to set."
+        },
+        "connectTimeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "SSH connection timeout in ms for this profile."
+        },
+        "keepaliveIntervalMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "SSH keepalive interval in ms for this profile."
+        }
+      }
+    },
+    "SshAuthRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Use ssh-agent for authentication.",
+          "properties": {
+            "type": { "type": "string", "const": "agent" },
+            "socket": { "type": "string", "minLength": 1, "description": "Explicit ssh-agent socket path (optional, auto-discovered by default)." }
+          },
+          "required": ["type"]
+        },
+        {
+          "type": "object",
+          "description": "Use a key file for authentication. Password auth is prohibited.",
+          "properties": {
+            "type": { "type": "string", "const": "key-file" },
+            "path": { "type": "string", "minLength": 1, "description": "Path to the private key file. Supports ~ expansion." },
+            "passphraseEnv": { "type": "string", "minLength": 1, "description": "Environment variable name holding the passphrase (NOT the passphrase itself)." }
+          },
+          "required": ["type", "path"]
+        }
+      ]
+    }
+  }
+}
