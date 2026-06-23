@@ -540,8 +540,8 @@ export class TmuxCore {
    *
    * 渲染策略：
    * - 普通模式：从 render channel 的 XtermAdapter 读取
-   * - Alt buffer（全屏 TUI）：用 capture-pane -p -e 作为主数据源，
-   *   通过临时 XtermAdapter 解析，避免 render channel 增量数据丢失问题
+   * - Alt buffer（全屏 TUI）：用 capture-pane -p 纯文本作为主数据源，
+   *   避免 render channel 增量数据丢失问题
    *
    * @param sessionId - session ID
    * @param mode - snapshot 模式（viewport 或 full）
@@ -647,11 +647,14 @@ export class TmuxCore {
    *
    * 全屏 TUI（Ink 等）使用 alternate buffer，render channel 的增量数据
    * 可能因 ANSI 重绘序列导致 XtermAdapter 状态不一致。
-   * capture-pane 从 tmux server 直接获取当前 pane 完整渲染结果，
-   * 通过临时 XtermAdapter 解析，避免污染 session 的主 XtermAdapter。
+   * capture-pane -p 从 tmux server 获取当前 pane 的纯文本内容，
+   * 不经过 XtermAdapter 解析（避免 ANSI 序列与 PTY 流格式不兼容的问题）。
    */
   private async snapshotViaCapturePane(session: TmuxCoreSession, mode: TerminalSnapshotMode, view: TmuxSnapshotView, entryRenderPhase: RenderPhase): Promise<TerminalSnapshot> {
-    const captureResult = await session.transport.execTmux(["capture-pane", "-t", session.attachTarget, "-p", "-e"])
+    // capture-pane -p（不带 -e）返回纯文本，不含 ANSI escape 序列。
+    // 不用临时 XtermAdapter 解析 -e 输出，因为 tmux pane buffer 按行序列化后
+    // 与 xterm 期望的 PTY 流格式不兼容（缺少光标定位序列，CJK 宽字符导致 cell 错位）。
+    const captureResult = await session.transport.execTmux(["capture-pane", "-t", session.attachTarget, "-p"])
     if (captureResult.exitCode !== 0) {
       this.logger.warn("tmux-core capture-pane failed in alt-buffer mode; falling back to render channel", {
         sessionId: session.sessionInfo.sessionId,
@@ -660,57 +663,61 @@ export class TmuxCore {
       return this.snapshotViaRenderChannel(session, mode, view, entryRenderPhase)
     }
 
-    // 临时 XtermAdapter 解析 capture-pane 输出，不污染 session 主 adapter
-    const tempAdapter = new XtermAdapter(session.cols, session.rows)
-    try {
-      await tempAdapter.write(captureResult.stdout)
-      const screen = tempAdapter.readScreen(mode)
-      const highlights = tempAdapter.detectHighlights(mode)
-      const screenText = screen.lines.map((line) => line.text).join("\n")
+    const rawLines = captureResult.stdout.split("\n")
+    // capture-pane 可能返回超过 rows 行（含 tmux history），只取末尾 rows 行作为 viewport
+    const viewportLines = rawLines.length > session.rows
+      ? rawLines.slice(rawLines.length - session.rows)
+      : rawLines
+    const trimmedLines = viewportLines.map((line: string) => line.trimEnd())
+    const screenText = trimmedLines.join("\n")
 
-      const titleResult = await session.transport.execTmux(["display-message", "-t", session.attachTarget, "-p", "#{session_name}"])
-      const screenHash = hashScreen(screenText)
-      const changed = session.renderDirty || session.lastScreenHash !== screenHash
-      const riskSignals = detectRiskSignals(screenText)
-
-      const activeGeometry = this.getActivePaneGeometry(session)
-      let effectiveScreenText: string
-      if (view === "pane") {
-        effectiveScreenText = activeGeometry !== null
-          ? cropToPane(screenText, activeGeometry, screen.cols)
-          : screenText
-      } else {
-        effectiveScreenText = screenText
-      }
-
-      const snapshotResult = createSnapshot({
-        sessionId: session.sessionInfo.sessionId,
-        screen: effectiveScreenText,
-        cursor: screen.cursor,
-        cols: screen.cols,
-        rows: screen.rows,
-        scrollbackLineCount: 0,
-        status: session.sessionInfo.status,
-        changed,
-        exitCode: session.sessionInfo.exitCode,
-        title: titleResult.stdout.trim() || screen.title,
-        isFullscreen: true,
-        highlights,
-        riskSignals,
-        renderStatus: entryRenderPhase,
-      })
-
-      session.lastScreenHash = screenHash
-      session.snapshotCount += 1
-      session.renderDirty = false
-      session.sessionInfo.lastActivityAt = snapshotResult.timestamp
-      session.xtermAdapter.markClean()
-      session.transcript.recordSnapshot(snapshotResult.screen)
-
-      return snapshotResult
-    } finally {
-      tempAdapter.dispose()
+    const cursorResult = await session.transport.execTmux(["display-message", "-t", session.attachTarget, "-p", "#{cursor_x} #{cursor_y}"])
+    const cursorParts = cursorResult.stdout.trim().split(" ")
+    const cursor = {
+      x: cursorParts.length >= 1 ? parseInt(cursorParts[0], 10) || 0 : 0,
+      y: cursorParts.length >= 2 ? parseInt(cursorParts[1], 10) || 0 : 0,
     }
+
+    const titleResult = await session.transport.execTmux(["display-message", "-t", session.attachTarget, "-p", "#{session_name}"])
+    const screenHash = hashScreen(screenText)
+    const changed = session.renderDirty || session.lastScreenHash !== screenHash
+    const riskSignals = detectRiskSignals(screenText)
+
+    const activeGeometry = this.getActivePaneGeometry(session)
+    let effectiveScreenText: string
+    if (view === "pane") {
+      effectiveScreenText = activeGeometry !== null
+        ? cropToPane(screenText, activeGeometry, session.cols)
+        : screenText
+    } else {
+      effectiveScreenText = screenText
+    }
+
+    const snapshotResult = createSnapshot({
+      sessionId: session.sessionInfo.sessionId,
+      screen: effectiveScreenText,
+      cursor,
+      cols: session.cols,
+      rows: session.rows,
+      scrollbackLineCount: 0,
+      status: session.sessionInfo.status,
+      changed,
+      exitCode: session.sessionInfo.exitCode,
+      title: titleResult.stdout.trim(),
+      isFullscreen: true,
+      highlights: [],
+      riskSignals,
+      renderStatus: entryRenderPhase,
+    })
+
+    session.lastScreenHash = screenHash
+    session.snapshotCount += 1
+    session.renderDirty = false
+    session.sessionInfo.lastActivityAt = snapshotResult.timestamp
+    session.xtermAdapter.markClean()
+    session.transcript.recordSnapshot(snapshotResult.screen)
+
+    return snapshotResult
   }
 
   /**
